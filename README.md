@@ -433,13 +433,22 @@ DSH 走的是 **nightly 频道**（经常更新），所以升级后值得按「
 > 以及临时文件被写进仓库根目录。前者已加 `utf8-bom` 规则永久守住，后者改成一律写 `.test-tmp/`。
 
 **尚未验证**
-- **没有对真实邮箱服务商完整投递过**：隐式 TLS / 真证书 / 真 EHLO 已用
-  `pnpm run verify:smtp --probe` 对着 `smtp.qq.com:465` 验证通过（服务器还声明了
-  `AUTH LOGIN PLAIN`，正好对上实现的回落顺序）；但带真实凭据发出并收到邮件这一步
-  需要你自己的授权码才能验，脚本已经准备好（`pnpm run verify:smtp`）
-- 面板在**真实界面里**的显示 —— 注入行/路由/信任栅栏/浏览器脚本都过了用例（含真 HTTP 冒烟），
-  但「桌面壳把注入行应用到页面上、按钮真的出现」这一步离线跑不了，需要重启 DSH 看
+- 面板在**真实界面里**的显示与操作 —— ✅ 已补验（按钮出现、可拖动、深浅配色、保存实时生效）
 - 未在 macOS / Linux 上验证
+- SMTP 的 **STARTTLS（587）** 分支还没被覆盖：假服务器是明文的，真服务器用的是隐式 TLS（465）。
+  要用 587 之前建议先补一个支持 STARTTLS 的本地 TLS 假服务器
+
+**已用真实服务商完整投递（2026-09-28）**
+
+对着 `smtp.qq.com:465` 用真实账号 + 授权码走完了全程：
+
+```
+220 greeting → 250 EHLO（250-AUTH LOGIN PLAIN）→ 235 AUTH PLAIN Authentication successful
+→ 250 MAIL FROM → 250 RCPT TO → 354 DATA → 250 DATA body（queued as）→ 221 QUIT
+✓ 投递成功（1189 ms）· TLS：已加密
+```
+
+这一步顺带验证了**生产推荐的那条路径**：凭据只走环境变量（`smtpPassEnv`），不落盘。
 
 ## 发布
 

@@ -91,7 +91,13 @@ const { config } = normalizeConfig({
   smtpUser: user,
   smtpFrom: from,
   smtpTo: to,
-  allowInsecureAuth: allowInsecure
+  allowInsecureAuth: allowInsecure,
+  // ⚠️ 必须显式告诉插件去哪儿取密码。脚本自己从 DSH_SMTP_PASS 读到了，但 normalizeConfig
+  // 会给 smtpPassEnv 填默认值 DSH_SMTP_PASSWORD —— 于是 resolveSmtpPassword 去那个变量里找，
+  // 找不到就报「未取到 SMTP 密码」。真实踩过：脚本显示「已从环境变量读到（16 字符）」，
+  // 却紧接着抛这个错，两边看起来自相矛盾。
+  // 顺便这样也就顺带验证了生产推荐的那条路径（凭据只走环境变量、不落盘）。
+  smtpPassEnv: 'DSH_SMTP_PASS'
 })
 
 console.log('─'.repeat(72))
