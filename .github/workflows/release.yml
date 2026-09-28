@@ -1,0 +1,115 @@
+# ============================================================================
+# 发布 —— tag 触发
+# ============================================================================
+# ⚠️ npm 的一个硬约束（来自 npm 自己的文档 npm-trust.md）：
+#     "Package must exist: The package you're configuring must already exist
+#      on the npm registry."
+#   所以**首次发布不可能走 OIDC** —— 包还不存在，就配不了 Trusted Publisher；
+#   配不了，OIDC 发布就会 404。
+#
+#   因此本 workflow 有两段发布步骤，按 NPM_TOKEN secret 是否存在自动二选一：
+#     · 有 NPM_TOKEN  → 引导发布（用临时令牌）
+#     · 没 NPM_TOKEN  → OIDC Trusted Publishing（长期方式，仓库里不存任何凭据）
+#
+#   首次发布流程：
+#     1. 在 npmjs.com 建一个 **Granular Access Token**，勾上 bypass 2FA
+#        （注意：`npm trust` 命令本身不接受这类令牌，但 `npm publish` 接受。
+#          2FA 是 npm 账号级要求，先在账号设置里打开）
+#     2. 把它存成仓库 secret：Settings → Secrets and variables → Actions → 新建 NPM_TOKEN
+#     3. 推 tag → 本次走引导发布
+#     4. 发布成功后，到 npm 包页面 Settings → Trusted Publisher 配好：
+#          仓库 ktouch10/dsh-away-notify · workflow release.yml · environment 留空
+#     5. **删除 NPM_TOKEN secret** —— 之后所有发布自动走 OIDC，仓库里不再有任何 npm 凭据
+#
+#   ⚠️ 发布不可逆：同一个版本号不能重发。首次发布前请确认 `pnpm run check` 是绿的。
+# ============================================================================
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # 创建 GitHub Release
+  id-token: write # npm Trusted Publishing / provenance 用 OIDC
+
+jobs:
+  publish:
+    name: 校验 → 检查 → 发布
+    runs-on: ubuntu-latest
+    # 提到 job 级：step 级的 env 在**该 step 自己的** if 里读不到，job 级可以
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24 自带 npm 11 —— provenance 与 trusted publishing 都需要 npm >= 11.5.1
+          node-version: '24'
+          cache: pnpm
+
+      - name: 校验 tag 与 package.json 的 version 一致
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          echo "tag=$tag  package.json=$pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag 与 package.json 的 version $pkg 不一致"
+            exit 1
+          fi
+
+      - name: 校验发布元数据已填（不能还是模板占位符）
+        run: |
+          node -e '
+            const pkg = require("./package.json");
+            const url = typeof pkg.repository === "string" ? pkg.repository : pkg.repository?.url;
+            if (!url) {
+              console.error("::error::package.json 缺少 repository");
+              process.exit(1);
+            }
+            if (url.includes("OWNER")) {
+              console.error("::error::package.json 的 repository 还是 OWNER 占位符，请先改成你自己的仓库地址");
+              process.exit(1);
+            }
+            console.log("repository =", url);
+          '
+
+      - run: pnpm install --frozen-lockfile
+
+      # 发布前再跑一遍全量检查（含 tarball 内容核对）
+      - name: 全量检查
+        run: pnpm run check
+
+      - name: 选出发布方式
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "::notice::检测到 NPM_TOKEN —— 本次走**引导发布**。发布成功后请配置 Trusted Publisher 并删除该 secret。"
+          else
+            echo "::notice::没有 NPM_TOKEN —— 本次走 OIDC Trusted Publishing。"
+          fi
+
+      # ── 引导发布（仅当 NPM_TOKEN 存在）──────────────────────────────────
+      - name: 发布到 npm（引导：临时令牌）
+        if: env.NPM_TOKEN != ''
+        env:
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/.npmrc
+        run: |
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$NPM_CONFIG_USERCONFIG"
+          npm publish --provenance --access public
+          rm -f "$NPM_CONFIG_USERCONFIG"
+
+      # ── 长期方式：OIDC，仓库里不存任何 npm 凭据 ─────────────────────────
+      - name: 发布到 npm（OIDC Trusted Publishing）
+        if: env.NPM_TOKEN == ''
+        run: npm publish --provenance --access public
+
+      - name: 创建 GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}

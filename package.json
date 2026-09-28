@@ -1,0 +1,79 @@
+{
+  "name": "dsh-away-notify",
+  "version": "0.1.0",
+  "description": "DSH plugin: only ping me when the agent has really finished AND I have not come back for N minutes. Configurable dwell, brief result summary, plain SMTP or a local outbox.",
+  "type": "module",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./lib/*": "./src/*",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ktouch10/dsh-away-notify.git"
+  },
+  "homepage": "https://github.com/ktouch10/dsh-away-notify#readme",
+  "bugs": {
+    "url": "https://github.com/ktouch10/dsh-away-notify/issues"
+  },
+  "author": "ktouch10",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "check:hygiene": "node scripts/check-hygiene.mjs",
+    "check:tarball": "node scripts/check-tarball.mjs",
+    "test": "node --test test/",
+    "demo": "node scripts/demo.mjs",
+    "settings": "node scripts/print-settings.mjs",
+    "inspect": "node scripts/inspect-session.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "notification",
+    "notify",
+    "email",
+    "smtp",
+    "idle",
+    "dwell",
+    "away",
+    "afk",
+    "reminder"
+  ],
+  "devDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "yaml": "^2.9.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  }
+}

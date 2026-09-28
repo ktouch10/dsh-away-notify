@@ -1,0 +1,21 @@
+# 统一换行：仓库里存 LF，checkout 时也保持 LF。
+# 这个项目在 Windows 上开发、在 Linux CI 上验证，不统一的话 diff 会到处是整文件变更。
+* text=auto eol=lf
+
+# 明确按二进制处理
+*.tgz binary
+*.zstd binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.mp3 binary
+*.wav binary
+
+# 让 GitHub 的语言统计与 diff 视图正确识别
+*.mjs text
+*.yml text
+*.yaml text
+*.md text
+
+# 锁文件在 diff 里折叠掉
+pnpm-lock.yaml linguist-generated=true

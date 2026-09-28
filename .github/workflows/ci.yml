@@ -1,0 +1,80 @@
+# ============================================================================
+# CI —— 每次 push / PR 都跑
+# ============================================================================
+# 关键点：CI 跑的就是本地那条 `pnpm run check`，不另写一套命令。
+# 本地绿、CI 红这种事，八成是因为两边命令不一样。
+# ============================================================================
+
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# 同一分支的新推送取消上一次还在跑的检查
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: 全量检查（Node ${{ matrix.node }}）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines 声明的是 >=22；这里两头都测
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 全量检查（语法 + 测试 + demo + 设置预览 + 卫生 + 发布产物）
+        run: pnpm run check
+
+  # 本插件宣称零运行时依赖。这个 job 在**什么都不装**的环境里验证这一点 ——
+  # 只要哪天有人不小心引入了一个运行时 import，这里立刻会红。
+  zero-dependency:
+    name: 零依赖冒烟
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 不执行任何 install，直接跑不需要 schemastery 的用例
+        run: |
+          node --test \
+            test/dwell.test.mjs \
+            test/summary.test.mjs \
+            test/smtp.test.mjs \
+            test/notifier.test.mjs \
+            test/real-contract.test.mjs
+
+      - name: 演示必须能在零依赖下跑完
+        run: node scripts/demo.mjs
+
+      - name: 没有 schemastery 时应降级（而不是崩）—— 顺带验证降级路径
+        run: |
+          out="$(node scripts/print-settings.mjs)"
+          printf '%s\n' "$out"
+          printf '%s' "$out" | grep -q "未加载"
+
+      - name: 仓库卫生检查（纯 Node 内置模块）
+        run: node scripts/check-hygiene.mjs

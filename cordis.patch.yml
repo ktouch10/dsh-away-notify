@@ -1,0 +1,75 @@
+# ============================================================================
+# dsh-away-notify —— bundle patch
+# ============================================================================
+# DSH 启动时按 bundle 层栈叠加各插件 patch，本文件把插件行插进 profile 配置树。
+#
+# 安装：
+#   dsh plugin --profile <你的 profile> add dsh-away-notify
+# 本地开发（link 安装）：
+#   dsh plugin --profile <你的 profile> add link:<本目录绝对路径>
+#
+# profile 名不一定是 `web`：桌面端（DeepSeek Harness.exe）常用 `desktop`。
+# 看一眼 ~/.dsh/profiles/ 下有哪些目录即可确认。
+#
+# ⚠️ 下面这条 entry 的 `id` **必须**是 `away-notify`（= 设置命名空间名）。
+#    这正是设置卡片能被**写入**的前提之一：
+#      DSH 的 settings.write() 靠 `configEditor.entries().find(row => row.options.id === ns)`
+#      定位目标，id 与命名空间不同名就会抛
+#      `No configurable plugin entry "away-notify"`，卡片保存不了。
+#      另外两个前提：插件导出 `Config`，且 `Config` 里至少有一个 volatile 字段。
+#    `name` 才是包名，不要改。
+#
+# 配置项与设置卡片是**同一批扁平键**（不存在两层配置谁覆盖谁的问题）：
+# 合并顺序由 DSH 决定 —— schema 默认 → 本 composition base → 用户设置层。
+# ============================================================================
+
+- insert:
+    - id: away-notify
+      name: dsh-away-notify
+      config:
+        # ── 总开关 ──────────────────────────────────────────────────────
+        enabled: true
+
+        # ── 核心旋钮 ────────────────────────────────────────────────────
+        # 回合结束后，安静多少分钟仍无「用户回来」的信号，才发出提醒。
+        # 设 0 = 退化成「干完就发」（和现有插件一样），所以别设 0。
+        dwellMinutes: 5
+
+        # 一批工作反复续跑时，提醒最晚推迟到「首个回合结束 + 这么多分钟」。
+        # 防止 agent 自己唤醒自己导致提醒被无限推迟。
+        maxDwellMinutes: 30
+
+        # 内部轮询间隔（秒）。定时器只负责检查是否到点，不决定提醒时机。
+        tickSeconds: 5
+
+        # ── 什么算「你回来了」──────────────────────────────────────────
+        # 只有真正的用户消息会取消待发提醒（source.kind === 'user'）。
+        # 注意：DSH 会注入 role 同样是 "user" 的 runtime-context / skill-catalog /
+        # agent-message / subagent-settled，它们都**不算**你在场。
+        cancelOnUserMessage: true
+
+        # turn/start 不是可靠的「人在」信号：目标续跑、后台任务唤醒 agent 都会开新回合。
+        # 默认关闭，否则提醒会被系统行为不断撤销。
+        cancelOnTurnStart: false
+
+        # ── 什么时候不值得吵你 ──────────────────────────────────────────
+        minToolCalls: 0
+        suppressEmptyTurns: true
+
+        # ── 投递 ────────────────────────────────────────────────────────
+        # outbox = 写成本地文件（默认，零配置即可跑通）；smtp = 真的发邮件
+        transport: outbox
+        outboxDir: ''
+        subjectPrefix: '[DSH]'
+        language: zh
+        excerptChars: 400
+
+        smtpHost: ''
+        smtpPort: 465
+        smtpSecure: true
+        smtpUser: ''
+        # 不要把密码写进这里：留空并改用环境变量 DSH_SMTP_PASSWORD
+        smtpPass: ''
+        smtpPassEnv: DSH_SMTP_PASSWORD
+        smtpFrom: ''
+        smtpTo: ''

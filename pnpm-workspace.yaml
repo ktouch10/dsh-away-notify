@@ -1,0 +1,12 @@
+# 开发用配置（与 DSH profile 自己的布局保持一致）。
+#
+# 为什么需要它：pnpm 默认用 isolated 布局，把依赖链成深层软链；在受限环境/Windows 上
+# 会链不全（实测 @deepseek-ai/schemastery 的子依赖 @deepseek-ai/cosmokit 解析不到）。
+# hoisted 布局把依赖平铺到 node_modules，稳定可解析。
+#
+# 注意：这是开发/测试配置。作为 DSH 插件被安装时，pnpm 用的是 profile 自己的设置。
+packages:
+  - .
+
+nodeLinker: hoisted
+autoInstallPeers: false

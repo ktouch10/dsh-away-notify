@@ -1,0 +1,17 @@
+# 依赖与产物
+node_modules/
+.test-tmp/
+.demo-outbox/
+*.tgz
+
+# 凭据：永远不要提交。需要模板就用 .env.example
+.env
+.env.*
+!.env.example
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
