@@ -142,22 +142,55 @@ export function buildConfig (z) {
 export const Config = buildConfig(loadSchema())
 
 /**
- * 注册设置命名空间。
+ * 安全地读一个 cordis 服务。
  *
- * 注意：命名空间能被**写入**还依赖上面那三个条件，本函数只负责让设置页出现这个域。
- * 注册失败绝不能让插件挂掉 —— 配置仍从 cordis.patch.yml 读。
+ * ⚠️ cordis 的 `ctx` 是 Proxy：**访问一个没有 `inject` 的服务会直接抛**
+ * `cannot get property "x" without inject` —— 可选链 `ctx?.x` 挡不住，
+ * 因为抛的是属性读取这个动作本身。
+ *
+ * 本插件第一次装进真实 DSH 时就是「启动失败」，根因正是 `ctx?.settings` /
+ * `ctx?.logger` 这样的裸读。所以统一走这里：
+ *   1. `ctx.get(name)` —— cordis 的安全访问器，服务不存在返回 undefined
+ *   2. 再退回直接属性访问，用 try/catch 包住
+ * 两条都不通才算「没有这个服务」。
  */
-export function registerSettings (ctx, { schema = Config, log = () => {} } = {}) {
-  const settings = ctx?.settings
-  if (!settings || typeof settings.register !== 'function') {
-    log('warn', `settings 服务不可用，跳过「${NAMESPACE}」命名空间注册（配置仍从 cordis.patch.yml 读取）`)
-    return null
-  }
-  if (!schema) {
-    log('warn', '没拿到 @deepseek-ai/schemastery，跳过设置卡片（配置仍从 cordis.patch.yml 读取）')
-    return null
+export function readService (ctx, name) {
+  if (!ctx) return undefined
+  try {
+    if (typeof ctx.get === 'function') {
+      const viaGet = ctx.get(name)
+      if (viaGet !== undefined) return viaGet
+    }
+  } catch {
+    // ctx.get 本身不可用，继续往下试
   }
   try {
+    return ctx[name]
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 注册设置命名空间。
+ *
+ * 命名空间能被**写入**还依赖上面那三个条件，本函数只负责让设置页出现这个域。
+ *
+ * **注册失败绝不能让插件挂掉** —— 设置卡片是可选功能，配置始终能从 cordis.patch.yml 读。
+ * 所以整个函数体（包括读服务那一步）都在 try/catch 里。
+ */
+export function registerSettings (ctx, { schema = Config, log = () => {} } = {}) {
+  try {
+    const settings = readService(ctx, 'settings')
+    if (!settings || typeof settings.register !== 'function') {
+      log('warn', `settings 服务不可用，跳过「${NAMESPACE}」命名空间注册（配置仍从 cordis.patch.yml 读取）`)
+      return null
+    }
+    if (!schema) {
+      log('warn', '没拿到 @deepseek-ai/schemastery，跳过设置卡片（配置仍从 cordis.patch.yml 读取）')
+      return null
+    }
+
     const scope = settings.register(NAMESPACE, schema, {
       base: { ...SETTINGS_DEFAULTS },
       applies: 'live'
@@ -173,4 +206,38 @@ export function registerSettings (ctx, { schema = Config, log = () => {} } = {})
     log('error', `注册设置命名空间失败：${message}`)
     return null
   }
+}
+
+/**
+ * 把设置命名空间挂上去 —— 现在挂，或者等 settings 服务出现再挂。
+ *
+ * 为什么要等：`dsh-settings-file` 的异步初始化在本插件激活**之后**才完成，
+ * 所以 apply 时一次性读 `ctx.get('settings')` 常常是 undefined。
+ * 设置域没挂上，设置页里那张卡片就什么都不渲染（dsh-notify-long 的 README 记过这个坑）。
+ */
+export function setupSettings (ctx, { schema = Config, log = () => {} } = {}) {
+  if (readService(ctx, 'settings')) {
+    return registerSettings(ctx, { schema, log })
+  }
+
+  log('info', 'settings 服务尚未就绪，等它出现后再注册设置命名空间')
+
+  let canInject = false
+  try {
+    canInject = typeof ctx?.inject === 'function'
+  } catch {
+    canInject = false
+  }
+
+  if (!canInject) {
+    log('warn', 'ctx.inject 不可用，本次不注册设置卡片（配置仍从 cordis.patch.yml 读取）')
+    return null
+  }
+
+  try {
+    ctx.inject(['settings'], inner => registerSettings(inner ?? ctx, { schema, log }))
+  } catch (error) {
+    log('warn', `延迟注册设置命名空间失败：${error?.message ?? error}`)
+  }
+  return null
 }

@@ -14,7 +14,7 @@ import { normalizeConfig, DEFAULTS } from './config.mjs'
 import { createDwellScheduler } from './dwell.mjs'
 import { createTurnAggregator, renderNotification, suppressionReason, normalizeReason } from './summary.mjs'
 import { deliver } from './transports.mjs'
-import { NAMESPACE, Config, registerSettings } from './settings.mjs'
+import { NAMESPACE, Config, readService, registerSettings, setupSettings } from './settings.mjs'
 
 export const name = 'dsh-away-notify'
 
@@ -23,7 +23,9 @@ export const name = 'dsh-away-notify'
 export { Config }
 
 function makeLogger (ctx) {
-  const sink = ctx?.logger
+  // 必须走 readService：cordis 的 ctx 是 Proxy，裸读一个没 inject 的服务会抛
+  // `cannot get property "logger" without inject`，可选链挡不住（`ctx?.logger` 同样抛）。
+  const sink = readService(ctx, 'logger')
   return (level, message) => {
     const line = `[dsh-away-notify] ${message}`
     try {
@@ -233,8 +235,8 @@ export function apply (ctx, rawConfig = {}) {
   for (const warning of warnings) log('warn', warning)
 
   // 必须在 enabled 判断之前注册：否则用户把插件关掉之后，就再也没有 UI 入口把它打开了。
-  // 注册失败只告警不抛错 —— 配置仍然可以从 cordis.patch.yml 读。
-  registerSettings(ctx, { log })
+  // setupSettings 全程 try/catch，且会在 settings 服务晚到时延迟绑定。
+  setupSettings(ctx, { log })
 
   if (!config.enabled) {
     log('info', 'enabled=false，不监听任何事件')
@@ -243,10 +245,20 @@ export function apply (ctx, rawConfig = {}) {
 
   const notifier = createNotifier({ config, log })
 
+  // ctx 是 Proxy：连 `typeof ctx.on` 这样的能力探测都可能抛（属性读取本身就会抛），
+  // 所以探测也必须包起来。
+  const can = service => {
+    try { return typeof ctx?.[service] === 'function' } catch { return false }
+  }
+
   const disposers = []
-  if (typeof ctx?.on === 'function') {
-    const disposer = ctx.on('session/event', notifier.handleSessionEvent)
-    if (typeof disposer === 'function') disposers.push(disposer)
+  if (can('on')) {
+    try {
+      const disposer = ctx.on('session/event', notifier.handleSessionEvent)
+      if (typeof disposer === 'function') disposers.push(disposer)
+    } catch (error) {
+      log('error', `订阅 session/event 失败：${error?.message ?? error}`)
+    }
   } else {
     log('warn', 'ctx.on 不可用：插件已挂载但收不到事件')
   }
@@ -269,9 +281,14 @@ export function apply (ctx, rawConfig = {}) {
     disposers.length = 0
   }
 
-  if (typeof ctx?.effect === 'function') {
-    // cordis 的 effect：返回的函数在插件卸载 / 热重载时执行
-    ctx.effect(() => dispose)
+  if (can('effect')) {
+    try {
+      // cordis 的 effect：返回的函数在插件卸载 / 热重载时执行
+      ctx.effect(() => dispose)
+    } catch (error) {
+      log('warn', `ctx.effect 注册失败（不影响功能）：${error?.message ?? error}`)
+      disposers.push(dispose)
+    }
   } else {
     disposers.push(dispose)
   }
@@ -287,4 +304,4 @@ export function apply (ctx, rawConfig = {}) {
 }
 
 export { normalizeConfig, DEFAULTS, unwrapVolatile } from './config.mjs'
-export { NAMESPACE, SETTINGS_DEFAULTS, buildConfig, registerSettings } from './settings.mjs'
+export { NAMESPACE, SETTINGS_DEFAULTS, buildConfig, registerSettings, readService, setupSettings } from './settings.mjs'
