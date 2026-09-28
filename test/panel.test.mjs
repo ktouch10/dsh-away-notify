@@ -345,6 +345,39 @@ test('字段表来源是宿主的 FIELD_SPECS（面板不自己维护一份）',
   assert.ok(Object.keys(SETTINGS_DEFAULTS).length >= 20)
 })
 
+test('配色不依赖宿主的 CSS 变量（上一版就是这么变成黑底黑字的）', () => {
+  const text = panelScriptText()
+  assert.ok(
+    !/var\(--(?:dsw|dsh)/.test(text),
+    '不能依赖宿主主题变量 —— 拿不到或语义变了就会黑底黑字'
+  )
+  assert.match(text, /createElement\('style'\)/, '应该自己注入 <style>')
+  assert.match(text, /an-dark/, '要有深色配色')
+  assert.match(text, /an-light/, '要有浅色配色')
+  assert.match(text, /function isDark/, '要按实际背景亮度自动选深浅')
+  assert.match(text, /getComputedStyle\(document\.body\)/, '亮度判定要读真实背景色')
+})
+
+test('按钮可拖动，并记住位置', () => {
+  const text = panelScriptText()
+  for (const evt of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+    assert.ok(text.includes(evt), `拖动需要处理 ${evt}`)
+  }
+  assert.match(text, /setPointerCapture/, '用指针捕获，拖出按钮外也跟得住')
+  assert.match(text, /localStorage/, '位置要持久化')
+  assert.match(text, /function clamp/, '拖出屏幕要夹回可见区')
+  assert.match(text, /addEventListener\('resize'/, '窗口变化后要重新夹回')
+  // 拖动与点击必须能区分：相对**按下点**移动超过阈值算拖动，否则才算点击
+  assert.match(text, /drag\.startX/, '要记录按下点以区分拖动/点击')
+  assert.match(text, /> 3/, '要有移动阈值')
+})
+
+test('面板脚本里不能出现反引号或模板插值（宿主用 String.raw 承载它）', () => {
+  const text = panelScriptText()
+  assert.ok(!text.includes('`'), '不能有反引号')
+  assert.ok(!text.includes('${'), '不能有模板插值')
+})
+
 // ─────────────────────── 真 HTTP 的端到端冒烟 ───────────────────────
 // 假 res 抓不到 Content-Length/头/真实请求对象这类问题，所以再来一遍真的。
 

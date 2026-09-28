@@ -57,7 +57,7 @@ dsh plugin --profile desktop add link:/path/to/dsh-away-notify
 
 | 来源 | 位置 | 说明 |
 |---|---|---|
-| **界面面板** | 界面**左下角**一个小小的「提醒」按钮 | 点开是一张分四组的表单，保存即写入覆盖层 |
+| **界面面板** | 界面**左下角**一个小小的「提醒」按钮（**可拖动**，位置会记住） | 点开是一张分四组的表单，保存即写入覆盖层 |
 | `cordis.patch.yml` | 插件包内 | 组合层 |
 | 覆盖层 JSON | `~/.dsh/dsh-away-notify/config.json` | 面板保存的那份，**优先级最高** |
 
@@ -69,6 +69,16 @@ dsh plugin --profile desktop add link:/path/to/dsh-away-notify
 
 > 覆盖层是**白名单**的：只认 schema 里那 22 个键，并按类型收敛（布尔/数字/枚举），
 > 写入是**原子**的（临时文件 + rename）。请求里塞 `__proto__` 或未知键都会被拒。
+
+### 两处刻意的界面选择
+
+- **自己注入 `<style>`，不依赖宿主的 CSS 变量。** 第一版卡片背景写的是
+  `var(--dsw-alias-background-primary, …)`，结果拿到的颜色和文字对不上，成了**黑底黑字**。
+  现在用**显式配色**，并按 `getComputedStyle(document.body).backgroundColor` 的**实际亮度**
+  自动选深/浅两套 —— 读得清优先于"贴合主题"。用例里有一条禁止它再出现 `var(--dsw…)`。
+- **按钮可拖动，且记住位置**（`localStorage`）。悬浮按钮难免挡东西：用指针捕获
+  （`setPointerCapture`）实现拖动，拖出可见区会被夹回来，窗口缩放也会重新夹；
+  相对**按下点**移动超过 3px 算拖动（不打开面板），否则算点击。
 
 ### 为什么面板是宿主端自己服务的，而不是原生设置页
 
@@ -233,7 +243,7 @@ Subject: [DSH] 任务已结束，5.0 分钟无人应答 · 修复登录接口超
 ```sh
 pnpm install                         # 2 个 devDependency：@deepseek-ai/schemastery、yaml
 pnpm run check                       # 一条命令跑完全部检查（与 CI 完全相同）
-node --test test/                    # 140 个用例
+node --test test/                    # 143 个用例
 node scripts/demo.mjs                # 端到端演示（虚拟时钟，不发真实邮件）
 node scripts/print-settings.mjs      # 打印设置卡片（面板）的字段表
 node scripts/inspect-session.mjs     # 读出你本机 DSH 的真实事件契约
@@ -275,7 +285,8 @@ src/transports.mjs     outbox 落盘 + 自研极简 SMTP（只用 node:net / nod
 src/config.mjs         volatile 解包 + 扁平配置归一化
 src/index.mjs          createNotifier() 接线层 + apply() cordis 入口
 src/field-spec.mjs     22 个字段的规格（标签/分组/范围）—— 面板的单一来源
-src/webpanel.mjs       宿主端面板：注入行 + 路由 + 信任栅栏 + 浏览器脚本
+src/webpanel.mjs       宿主端面板：注入行 + 路由 + 信任栅栏
+src/panel-script.mjs   面板的浏览器端脚本（字符串下发，不走构建）
 src/panel-config.mjs   覆盖层配置（白名单 + 类型收敛 + 原子写）
 test/dwell.test.mjs            状态机
 test/summary.test.mjs          折叠与渲染
@@ -463,7 +474,7 @@ git push origin main --tags
 ### 本地与 CI 用同一条命令
 
 ```sh
-pnpm run check          # 语法 + 140 个用例 + demo + 设置预览 + 卫生检查 + 发布产物检查
+pnpm run check          # 语法 + 143 个用例 + demo + 设置预览 + 卫生检查 + 发布产物检查
 pnpm run check:hygiene  # 只跑敏感信息扫描
 pnpm run check:tarball  # 只跑「真打一个包再核对内容」
 ```
