@@ -109,6 +109,32 @@ jobs:
         if: env.NPM_TOKEN == ''
         run: npm publish --provenance --access public
 
+      # ⚠️ 真实教训（2026-09-28 发 0.1.2）：**npm publish 报成功 ≠ 包真的上架了**。
+      #     那次 publish 明明打印了
+      #       npm notice Publishing to https://registry.npmjs.org/ with tag latest and public access
+      #       npm notice publish Signed provenance statement …
+      #       npm notice publish Provenance statement published to transparency log: …logIndex=…
+      #       npm notice Your package is being processed and may take a few minutes to become available.
+      #     步骤结论也是 success，但 registry 上查不到 0.1.2（registry / npmmirror 两条独立路径都查过），
+      #     暂存区也是空的。CI 全绿 + 包不存在，是最坏的一种组合：没人会去查。
+      #     所以这里强制核对 —— 等不到就让 CI 红。
+      - name: 确认这次发布真的生效
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          want="$(node -p "require('./package.json').version")"
+          echo "核对 $name@$want 是否已在 registry 上"
+          for i in $(seq 1 12); do
+            got="$(npm view "$name@$want" version 2>/dev/null || true)"
+            if [ "$got" = "$want" ]; then
+              echo "✓ $name@$want 已上架（第 $i 次查询）"
+              exit 0
+            fi
+            echo "  第 $i 次还没看到，10 秒后再试…"
+            sleep 10
+          done
+          echo "::error::npm publish 之后 registry 上仍然没有 $name@$want —— 发布并未真正生效"
+          exit 1
+
       - name: 创建 GitHub Release
         run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
         env:

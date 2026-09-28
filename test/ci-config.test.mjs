@@ -138,8 +138,11 @@ test('release.yml 拦住还没填的 OWNER 占位符', () => {
 
 test('release.yml 的长期发布方式是 OIDC，且那条路径不依赖任何仓库凭据', () => {
   const release = load('release.yml')
+  // 判据：**某一行以 `npm publish` 开头**，而不是「run 里出现过这个字符串」——
+  // 后者会把只是提到它的步骤（比如「确认发布真的生效」里那句 error 文案）也算进来。
   const publishSteps = steps(release, 'publish')
-    .filter(s => typeof s.run === 'string' && s.run.includes('npm publish'))
+    .filter(s => typeof s.run === 'string'
+      && s.run.split('\n').some(line => line.trim().startsWith('npm publish')))
 
   assert.equal(publishSteps.length, 2, '应该有两条发布路径：引导 + OIDC')
 
