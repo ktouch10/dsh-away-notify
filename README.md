@@ -192,8 +192,15 @@ node scripts/inspect-session.mjs     # 读出你本机 DSH 的真实事件契约
 > —— `@deepseek-ai/schemastery` 的子依赖 `@deepseek-ai/cosmokit` 会解析不到。
 
 > 受限沙箱里 `node --test test/` 会因禁止命名管道而 `EPERM`（测试运行器给每个文件开子进程）。
-> 这时改成单进程并显式列文件：
-> `node --test-isolation=none --test test/dwell.test.mjs test/summary.test.mjs test/smtp.test.mjs test/notifier.test.mjs test/real-contract.test.mjs test/settings.test.mjs test/ci-config.test.mjs`
+> 这时改成单进程并显式列文件。注意这个 flag **改过名**：
+>
+> | Node | flag |
+> |---|---|
+> | 20.14 / **22.x** | `--experimental-test-isolation=none` |
+> | 23 起（含 24） | `--test-isolation=none` |
+>
+> 传错名字会直接 `bad option` 并以 9 退出 —— 第一次 CI 就是这么挂的（矩阵里 Node 22 那个 job）。
+> `pnpm run check` 现在会**探测**当前 Node 支持哪个，不用你记。
 
 `scripts/demo.mjs` 用虚拟时钟驱动**真实的**接线层，几十毫秒跑完三个场景并把结果写进 `.demo-outbox/`：
 

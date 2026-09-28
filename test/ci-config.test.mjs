@@ -201,6 +201,20 @@ test('两个 workflow 都使用官方的 action 且锁在大版本上', () => {
   }
 })
 
+test('check 脚本不能硬写只有 Node 23+ 才认的 flag（矩阵里有 Node 22）', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'scripts', 'check.mjs'), 'utf8')
+
+  // 真实踩过：`--test-isolation` 是 Node 23 起才有的名字，Node 22.x 只认
+  // `--experimental-test-isolation`，传新名字会 `bad option` 并以 9 退出。
+  // 第一次推上去的 CI 就是这样：Node 24 的 job 全绿，Node 22 的 job 第二步直接挂。
+  assert.ok(src.includes('resolveIsolationFlags'), '应该探测当前 Node 支持哪个名字，而不是硬写')
+  assert.ok(src.includes('--experimental-test-isolation'), '必须保留 Node 22.x 认识的那个名字')
+  assert.ok(src.includes('--test-isolation'), '也要保留 Node 23+ 的名字')
+
+  // 而且探测必须真的跑起来 —— 两个候选都要有
+  assert.ok(/candidates\s*=\s*\[/.test(src), '候选列表应该存在')
+})
+
 test('workflow 文件本身不含敏感信息', () => {
   // 与仓库卫生检查同一套规则，这里只确认 workflow 目录被覆盖到了
   for (const name of ['ci.yml', 'release.yml']) {

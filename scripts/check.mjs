@@ -42,14 +42,40 @@ function run (args, label) {
   return result.status === 0
 }
 
+/**
+ * 选一个「当前 Node 支持」的关掉测试隔离的 flag。
+ *
+ * 这个 flag 改过名，而且旧名字在新 Node 上仍然可用、新名字在旧 Node 上直接报错：
+ *   · Node 20.14 / 22.x  —— `--experimental-test-isolation`
+ *   · Node 23 起          —— `--test-isolation`
+ * 实测：Node 22.23.3 传 `--test-isolation=none` 会 `bad option` 并以 9 退出。
+ *
+ * 第一次推上去的 CI 就是这么挂的：矩阵里有 Node 22，而我硬写了新名字 ——
+ * Node 24 的 job 全绿、Node 22 的 job 在第二步直接失败。所以这里探测着用。
+ */
+function resolveIsolationFlags () {
+  const candidates = [
+    ['--test-isolation=none'], // Node 23+
+    ['--experimental-test-isolation=none'], // Node 20.14 / 22.x
+    [] // 都不支持：退回默认（会给每个测试文件开子进程）
+  ]
+  for (const flags of candidates) {
+    const probe = spawnSync(process.execPath, [...flags, '-e', '0'], { stdio: 'ignore', shell: false })
+    if (probe.status === 0) return flags
+  }
+  return []
+}
+
+const ISOLATION_FLAGS = resolveIsolationFlags()
+
 const STEPS = [
   {
     label: '语法检查',
     run: () => SOURCES.every(file => run(['--check', file], `syntax ${file}`))
   },
   {
-    label: `单元 / 集成测试（${TESTS.length} 个文件）`,
-    run: () => TESTS.length > 0 && run(['--test-isolation=none', '--test', ...TESTS], 'tests')
+    label: `单元 / 集成测试（${TESTS.length} 个文件${ISOLATION_FLAGS.length ? `，${ISOLATION_FLAGS[0]}` : '，默认隔离'}）`,
+    run: () => TESTS.length > 0 && run([...ISOLATION_FLAGS, '--test', ...TESTS], 'tests')
   },
   {
     label: '端到端演示（demo）',
