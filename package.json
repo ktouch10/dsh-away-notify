@@ -71,22 +71,10 @@
     "yaml": "^2.9.1"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-client-ui-renderer": ">=0.1.5",
-    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.5",
-    "@deepseek-ai/schemastery": "^3.18.1",
-    "react": "^18.2.0"
+    "@deepseek-ai/schemastery": "^3.18.1"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-client-ui-renderer": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-client-ui-settings": {
-      "optional": true
-    },
     "@deepseek-ai/schemastery": {
-      "optional": true
-    },
-    "react": {
       "optional": true
     }
   }
