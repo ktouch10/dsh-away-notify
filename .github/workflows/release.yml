@@ -105,19 +105,28 @@ jobs:
           rm -f "$NPM_CONFIG_USERCONFIG"
 
       # ── 长期方式：OIDC，仓库里不存任何 npm 凭据 ─────────────────────────
+      # 幂等：版本已经在 registry 上就跳过发布（重跑 tag / 重跑 job 不会再红）。
+      # 2026-09-28 实测过一次：重跑时 npm 直接回
+      #   npm error You cannot publish over the previously published versions: 0.1.2.
+      # 而那次 CI 变红是**假警报** —— 包其实早就发出去了。与其让重跑失败，不如显式跳过。
       - name: 发布到 npm（OIDC Trusted Publishing）
         if: env.NPM_TOKEN == ''
-        run: npm publish --provenance --access public
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          want="$(node -p "require('./package.json').version")"
+          if npm view "$name@$want" version >/dev/null 2>&1; then
+            echo "::notice::$name@$want 已经在 registry 上 —— 跳过发布（重跑是安全的）"
+            exit 0
+          fi
+          npm publish --provenance --access public
 
-      # ⚠️ 真实教训（2026-09-28 发 0.1.2）：**npm publish 报成功 ≠ 包真的上架了**。
-      #     那次 publish 明明打印了
-      #       npm notice Publishing to https://registry.npmjs.org/ with tag latest and public access
-      #       npm notice publish Signed provenance statement …
-      #       npm notice publish Provenance statement published to transparency log: …logIndex=…
-      #       npm notice Your package is being processed and may take a few minutes to become available.
-      #     步骤结论也是 success，但 registry 上查不到 0.1.2（registry / npmmirror 两条独立路径都查过），
-      #     暂存区也是空的。CI 全绿 + 包不存在，是最坏的一种组合：没人会去查。
-      #     所以这里强制核对 —— 等不到就让 CI 红。
+      # ⚠️ **npm publish 报成功 ≠ 包真的上架了**，所以发布之后必须自己核对：
+      #     2026-09-28 发 0.1.2 时 publish 打印了「Publishing to registry.npmjs.org」
+      #     「Signed provenance statement」「Provenance statement published to transparency log」
+      #     「Your package is being processed and may take a few minutes to become available」，
+      #     步骤结论 success —— 而我在本机用 registry / npmmirror 两条路径都查不到 0.1.2
+      #     （后来证明是**我这边读到的是缓存**，包其实发出去了）。
+      #     所以这一步轮询等它出现：等不到就让 CI 红，而不是让人以为发成功了。
       - name: 确认这次发布真的生效
         run: |
           name="$(node -p "require('./package.json').name")"
@@ -135,7 +144,11 @@ jobs:
           echo "::error::npm publish 之后 registry 上仍然没有 $name@$want —— 发布并未真正生效"
           exit 1
 
+      # 幂等：Release 已存在（重跑）就不重复创建
       - name: 创建 GitHub Release
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            && echo "Release $GITHUB_REF_NAME 已存在，跳过" \
+            || gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
         env:
           GH_TOKEN: ${{ github.token }}
