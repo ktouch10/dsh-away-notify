@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [0.1.1]
+
+### Fixed
+
+- **README 里有个重复的空 `## 配置` 标题** —— 一次编辑留下的，已经随 0.1.0 发出去了。
+  npm 包不能重发同一个版本，所以只能发新版修（这正是下面那条守卫的由来）
+- README 的用例数、目录清单与实际同步
+
+### Added
+
+- **README 结构守卫**（`test/docs.test.mjs`）：检查重复标题、内部锚点是否能落到标题上、
+  相对链接指向的文件是否存在。README 是仓库门面也是 npm 页面内容，而 npm 包**不能重发同一版本** ——
+  文档的错要发新版才能修，所以值得在 CI 里挡住
+
 ## [0.1.0]
 
 首个版本。核心是一句话：**只在「活真的干完了，而且你 N 分钟没回来」时才提醒。**
@@ -50,5 +64,6 @@
   （启动结果、配置摘要**脱敏**、注册与订阅结果、每次决策；256KB 上限；写失败不影响功能）
 - **排查章节**（README「为什么没收到提醒」）
 
-[Unreleased]: https://github.com/ktouch10/dsh-away-notify/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ktouch10/dsh-away-notify/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ktouch10/dsh-away-notify/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ktouch10/dsh-away-notify/releases/tag/v0.1.0

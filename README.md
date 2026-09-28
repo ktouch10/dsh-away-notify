@@ -51,8 +51,6 @@ dsh plugin --profile desktop add link:/path/to/dsh-away-notify
 
 卸载：`dsh plugin --profile <profile> remove dsh-away-notify`
 
-## 配置
-
 ## 面板（设置卡片）
 
 > ⚠️ **实测结论：只有宿主半边的插件，卡片上不会有配置表单。**
@@ -190,7 +188,7 @@ Subject: [DSH] 任务已结束，5.0 分钟无人应答 · 修复登录接口超
 ```sh
 pnpm install                         # 2 个 devDependency：@deepseek-ai/schemastery、yaml
 pnpm run check                       # 一条命令跑完全部检查（与 CI 完全相同）
-node --test test/                    # 108 个用例
+node --test test/                    # 112 个用例
 node scripts/demo.mjs                # 端到端演示（虚拟时钟，不发真实邮件）
 node scripts/print-settings.mjs      # 打印设置卡片（面板）的字段表
 node scripts/inspect-session.mjs     # 读出你本机 DSH 的真实事件契约
@@ -239,6 +237,7 @@ test/real-contract.test.mjs    真实契约回归（钉住从真实会话日志�
 test/settings.test.mjs         设置卡片（schema 审计 + volatile 语义 + 命名空间注册）
 test/cordis-ctx.test.mjs       真实 cordis ctx 形状下的启动鲁棒性（Proxy 裸读会抛）
 test/diag.test.mjs             诊断日志（含「日志里绝不能出现密码」的断言）
+test/docs.test.mjs             README 结构守卫（重复标题 / 锚点 / 相对链接）
 test/ci-config.test.mjs        CI / 发布配置（真解析 workflow YAML，不是正则猜）
 test/fixtures/real-events.mjs  真实事件样本，逐字抄自本机会话日志
 scripts/check.mjs              全量检查入口（本地与 CI 同一条命令）
@@ -409,7 +408,7 @@ git push origin main --tags
 ### 本地与 CI 用同一条命令
 
 ```sh
-pnpm run check          # 语法 + 108 个用例 + demo + 设置预览 + 卫生检查 + 发布产物检查
+pnpm run check          # 语法 + 112 个用例 + demo + 设置预览 + 卫生检查 + 发布产物检查
 pnpm run check:hygiene  # 只跑敏感信息扫描
 pnpm run check:tarball  # 只跑「真打一个包再核对内容」
 ```
