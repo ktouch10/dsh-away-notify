@@ -168,6 +168,34 @@ test('resolveTitle 抛错时不影响提醒本身', async () => {
   assert.equal(notifier.stats.delivered, 1, '取标题失败绝不能影响提醒')
 })
 
+test('诊断日志覆盖四种决策：排定 / 挂起 / 撤销 / 投递', async () => {
+  // README 承诺「status.log 里按时间顺序记着每一次排定 / 撤销 / 挂起 / 投递」。
+  // 实测发现只记了投递 —— 于是「为什么没收到提醒」根本没法判断是没触发还是被撤销了。
+  // 这条用例把四种都钉住。
+  const dir = await tempDir()
+  const lines = []
+  let clock = T0
+  const { config } = normalizeConfig({ dwellMinutes: 5, transport: 'outbox', outboxDir: dir })
+  const notifier = createNotifier({ config, now: () => clock, log: (_level, message) => lines.push(message) })
+
+  runTurn(notifier)
+  assert.ok(lines.some(l => l.startsWith('排定')), `turn/end 应有「排定」记录，实际：\n${lines.join('\n')}`)
+
+  notifier.handleSessionEvent(SESSION, ev('turn/start', { turn: 2 }))
+  assert.ok(lines.some(l => l.startsWith('挂起')), 'turn/start 应有「挂起」记录（默认只挂起不撤销）')
+
+  runTurn(notifier, { turn: 2 })
+  notifier.handleSessionEvent(SESSION, ev('user/message', { source: { kind: 'user' }, content: '我回来了' }))
+  assert.ok(lines.some(l => l.startsWith('撤销')), '真人消息应有「撤销」记录')
+
+  runTurn(notifier, { turn: 3 })
+  clock += 5 * MIN
+  notifier.tick()
+  await notifier.flush()
+  assert.ok(lines.some(l => l.startsWith('已投递')), '到点应有「已投递」记录')
+  assert.equal(notifier.stats.delivered, 1)
+})
+
 test('plugin/system 注入的用户角色消息不算「人回来了」', async () => {
   const dir = await tempDir()
   const { notifier, advance } = setup({ outboxDir: dir })

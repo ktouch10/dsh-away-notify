@@ -261,16 +261,28 @@ export function createNotifier ({
           || synthesizeRecord(agg, sessionId, turn, data.reason, at)
         scheduler.noteTurnEnd(sessionId, record, at)
         stats.scheduled += 1
+        {
+          const label = String(sessionId).slice(0, 8)
+          let deadline = null
+          try { deadline = scheduler.deadlineOf(sessionId) } catch { deadline = null }
+          log('info', `排定 ${label}（第 ${record.turn ?? '?'} 轮，原因 ${record.reason}）：`
+            + `${config.dwellMinutes} 分钟内无用户消息则提醒`
+            + (Number.isFinite(deadline) ? `（截止 ${new Date(deadline).toISOString()}）` : ''))
+        }
         return
       }
 
       if (type === 'turn/start') {
         if (config.cancelOnTurnStart) {
           // 显式开启时，才把「开新回合」也当成人在的信号（见 cordis.patch.yml 说明）
-          if (scheduler.noteUserActivity(sessionId, at, 'turn-start')) stats.cancelled += 1
+          if (scheduler.noteUserActivity(sessionId, at, 'turn-start')) {
+            stats.cancelled += 1
+            log('info', `撤销 ${String(sessionId).slice(0, 8)} 的待发提醒（cancelOnTurnStart 打开，新回合视为人在）`)
+          }
         } else if (scheduler.noteTurnStart(sessionId, at)) {
           // 默认语义：只挂起，不撤销 —— 活还没干完，不该发「任务已结束」
           stats.paused += 1
+          log('info', `挂起 ${String(sessionId).slice(0, 8)} 的待发提醒（新回合开始，活还没干完）`)
         }
         return
       }
@@ -291,6 +303,7 @@ export function createNotifier ({
         if (config.cancelOnUserMessage && fromHuman) {
           if (scheduler.noteUserActivity(sessionId, at, `user-message:${kind || 'unknown'}`)) {
             stats.cancelled += 1
+            log('info', `撤销 ${String(sessionId).slice(0, 8)} 的待发提醒（真人消息回来了：${kind || 'user'}）`)
           }
         }
       }
