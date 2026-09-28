@@ -61,10 +61,20 @@ export function createDiagnostics ({
 /**
  * 配置摘要 —— **绝不能包含密码**。
  * 日志会留在磁盘上，明文写 smtpPass 等于把凭据抄了一份。
+ *
+ * 但「配了哪个环境变量」和「那个变量里到底有没有值」是两件事 —— 后者才是真正会出错的：
+ * 实测撞过「脚本显示已读到密码，插件却报未取到」，两边对不上。所以这里把**取到没有**
+ * 也写出来（只写是与否，永远不写值）。
  */
-export function describeConfig (config) {
+export function describeConfig (config, env = process.env) {
   const mail = config?.mail ?? {}
   const smtp = mail.smtp ?? {}
+
+  let pass
+  if (smtp.pass) pass = '字面量(已脱敏)'
+  else if (smtp.passEnv) pass = `env:${smtp.passEnv}${env?.[smtp.passEnv] ? '(已取到)' : '(未取到!)'}`
+  else pass = '(未配)'
+
   return [
     `enabled=${config?.enabled}`,
     `dwell=${config?.dwellMinutes}min`,
@@ -74,7 +84,7 @@ export function describeConfig (config) {
     `outboxDir=${mail.outboxDir ?? '(默认)'}`,
     `smtpHost=${smtp.host || '(未配)'}`,
     `smtpUser=${smtp.user ? '(已配)' : '(未配)'}`,
-    `smtpPass=${smtp.pass ? '字面量(已脱敏)' : (smtp.passEnv ? `env:${smtp.passEnv}` : '(未配)')}`,
+    `smtpPass=${pass}`,
     `smtpTo=${(smtp.to ?? []).length} 个收件人`
   ].join('  ')
 }
