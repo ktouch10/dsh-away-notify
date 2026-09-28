@@ -98,19 +98,29 @@ test('客户端半边声明了需要的服务', () => {
   assert.ok(services.includes('configForms'), '要读写配置，必须 inject configForms')
 })
 
-test('package.json 的 dsh.client 声明是合法的（写坏会让插件启动失败）', () => {
+test('客户端半边目前**不**在 package.json 里声明（等 boot 路径验证通过再打开）', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 
-  assert.ok(pkg.dsh?.client, '缺少 dsh.client 声明 —— 浏览器半边不会被发现')
-  assert.equal(pkg.dsh.client.platform, 'web')
-  assert.ok(Array.isArray(pkg.dsh.client.inject), 'dsh.client.inject 应该是包名数组（加载元数据）')
+  // 2026-09-28：加上 `dsh.client` 声明之后，**DSH 起不来了**。
+  // DSH 自己的文档写着：clientModules「Construction runs the activation scan
+  // synchronously — a malformed declaration or missing bundle among the already-loaded
+  // entries aggregates into one loud throw (FAILED fiber; the boot activation audit
+  // reports it)」。宿主半边在两次失败的启动里都正常 apply 了（status.log 有记录），
+  // 所以问题出在启动后半段的客户端插件清单上 —— 而那是这次唯一新增的启动路径改动。
+  //
+  // 所以先把声明停用：宿主半边照常工作，等能在一个可控的启动里确认 DSH 接受的
+  // bundle 形态（是单个已构建产物？还是会被改写？）之后再打开。
+  // 这条断言是刻意的「减速带」——重新打开前先把失败原因搞清楚。
+  assert.equal(pkg.dsh?.client, undefined, '要重新打开 dsh.client，先确认 bundle 形态被 DSH 接受')
 
-  // exports["./client"] 必须真的指向一个存在的文件：DSH 就是按它取 bundle 的
+  // 实现本身留着并被下面的用例检查（自包含、字段表不漂移），只是暂时不挂出去
+  assert.ok(fs.existsSync(CLIENT_PATH), 'src/client.mjs 应该留着（实现是好的，只是暂不声明）')
+
+  // exports["./client"] 留着无害；若存在就必须指向真文件
   const target = typeof pkg.exports?.['./client'] === 'string'
     ? pkg.exports['./client']
     : pkg.exports?.['./client']?.default
-  assert.ok(target, 'package.json 的 exports 里缺少 "./client"')
-  assert.ok(fs.existsSync(path.join(ROOT, target)), `exports["./client"] 指向的文件不存在：${target}`)
+  if (target) assert.ok(fs.existsSync(path.join(ROOT, target)), `exports["./client"] 指向的文件不存在：${target}`)
 })
 
 test('客户端与宿主用的是同一个命名空间（写成字面量会漂移）', () => {

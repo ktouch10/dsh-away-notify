@@ -8,11 +8,12 @@
 
 ### Added
 
-- **带表单的面板（客户端半边）**。之前只有宿主半边，设置页里那张卡片只有
+- **带表单的面板（客户端半边）—— 实现已完成，但暂不挂出**（原因见下方「已撤回」）。
+  之前只有宿主半边，设置页里那张卡片只有
   「完整名称 / 配置状态 / 运行状态」三行，**没有配置项** —— 拿装了半年的
   `qq-mode-console` 做对照也一样（它的注释写着「没有 browser/client 半，不会自动生成
-  WebUI 设置卡片」）。现在补上了客户端半边：
-  - `package.json` 声明 `dsh.client`，浏览器半边在 `exports["./client"]`
+  WebUI 设置卡片」）。客户端半边本身已经写好：
+  - 浏览器半边放在 `exports["./client"]`（`src/client.mjs`）
   - 往设置页的 `settings.plugins.tab` 注册一张表单，按「基本 / 触发规则 / 投递 / SMTP」
     分组渲染 22 个字段
   - 用 `ctx.configForms` 读写（`getSnapshot` / `subscribe` / `set` / `unset`），
@@ -22,6 +23,19 @@
   去连真实邮件服务器。`--probe` 只做连接 + TLS + EHLO（不需要账号、不发信、不送凭据），
   真发模式凭据只从环境变量读、输出全程脱敏。失败时按错误类型给排查提示
 - `sendSmtp` 新增 `probeOnly` 能力（探测与真发信走**同一段**连接/TLS/EHLO 代码路径）
+
+### 已撤回
+
+- **`dsh.client` 声明**。加上它之后 **DSH 起不来了**（打不开 / 报错退出）。
+  证据：那两次失败的启动里，宿主半边都正常 apply 了（`status.log` 有完整记录），
+  说明问题出在启动**后半段的客户端插件清单**上 —— 而 `dsh.client` 是那次唯一新增的
+  启动路径改动。DSH 自己的文档也警告过这一点：`clientModules` 的
+  「Construction runs the activation scan **synchronously** — a malformed declaration or
+  **missing bundle** among the already-loaded entries aggregates into one loud throw
+  (**FAILED fiber**; the boot activation audit reports it)」。
+  所以先摘掉声明，宿主半边照常工作；等能用可控的启动确认 DSH 接受的 bundle 形态
+  （是单个已构建产物？还是会被改写？）之后再打开。`test/client.test.mjs` 里有一条
+  刻意的「减速带」断言，防止没搞清原因就重新打开。
 
 ### 已用真实服务器验证
 
