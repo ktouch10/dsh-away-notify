@@ -51,60 +51,70 @@ dsh plugin --profile desktop add link:/path/to/dsh-away-notify
 
 卸载：`dsh plugin --profile <profile> remove dsh-away-notify`
 
-## 面板（设置卡片与配置表单）
+## 面板（配置界面）
 
-> ⚠️ **现状：配置表单的实现写好了，但暂时没挂出去。**
->
-> 加上 `dsh.client` 声明之后 **DSH 起不来了**（打不开）。那次排查唯一的抓手是插件自己的
-> 诊断日志 —— 它显示**两次失败的启动里宿主半边都正常 apply 了**（`session/event 订阅成功`、
-> `已启用`），所以炸的是启动**后半段的客户端插件清单**，而那正是当时唯一新增的启动路径改动。
->
-> DSH 的文档对这个失败模式有专门警告：
->
-> > `clientModules` 的构造会**同步**跑激活扫描 —— 已加载条目里只要有一个**声明写坏**或
-> > **bundle 找不到**，就会聚合成一次响亮的抛错（**FAILED fiber**，启动激活审计会报出来）。
->
-> 我猜错的地方（两处）：以为 `exports["./client"]` 指向一个手写的 `.mjs` 就够了。
-> 但 DSH 的客户端 bundle 是**用 CJS 模块系统包装的已构建产物** —— 从 DSH 自己的
-> `lib/client.js` 能看出形态：
->
-> ```js
-> (function (module, exports, require) { … exports.apply = apply; exports.inject = inject; return module.exports })
-> ```
->
-> 还有 `require.async("./client.pdf.js")` 这种分块加载。把带 ESM `import` 的源码交给它，
-> 等于往函数体里塞 `import` —— 语法错误 → 抛错 → **FAILED fiber**。所以要做客户端半边，
-> 得先有**构建步骤**把它打成那种包装形态，而不是直接交源码。
->
-> 所以先摘掉声明（`src/client.mjs` 留着，实现本身是对的），等把构建补上再打开。
-> **当前配置走 `cordis.patch.yml`，这条路实测可用。**
+配置有三条路，写的都是**同一批扁平键**：
 
-配置有两条路，写的是**同一批扁平键**：`cordis.patch.yml`（已验证可用），以及设置页里的一张表单（待挂出）。
+| 来源 | 位置 | 说明 |
+|---|---|---|
+| **界面面板** | 界面**左下角**一个小小的「提醒」按钮 | 点开是一张分四组的表单，保存即写入覆盖层 |
+| `cordis.patch.yml` | 插件包内 | 组合层 |
+| 覆盖层 JSON | `~/.dsh/dsh-away-notify/config.json` | 面板保存的那份，**优先级最高** |
 
-### 设置表单需要「客户端半边」
+优先级：`schema 默认值` < `cordis.patch.yml` < `覆盖层`。面板里每个被覆盖过的字段会有边框提示，
+「清除全部覆盖」可以一键回到 YAML 的值。
 
-实测结论，值得单独记一笔：**只有宿主半边的插件，设置页里不会有配置表单。**
+改完**立刻生效**（包括总开关：在面板里关掉就停止监听，打开就恢复），只有两个例外：
+改「静默时长 / 最晚推迟」会重建内部状态机（**待发提醒会重新计时**），改「轮询间隔」只重启定时器。
 
-装进真实 DSH 后，插件行会正常显示（完整名称 / 配置状态 / 运行状态），但**没有那 22 个字段**。
-拿装了半年的 `qq-mode-console` 做对照 —— 它也完全一样，而它的源码注释写着：
-「本插件没有 browser/client 半，**不会自动生成 WebUI 设置卡片**」。
+> 覆盖层是**白名单**的：只认 schema 里那 22 个键，并按类型收敛（布尔/数字/枚举），
+> 写入是**原子**的（临时文件 + rename）。请求里塞 `__proto__` 或未知键都会被拒。
 
-光有 `ctx.settings.register` + `Config` 只够让命名空间**可读写**，不足以渲染表单。
-表单要靠客户端半边，也就是：
+### 为什么面板是宿主端自己服务的，而不是原生设置页
 
-1. `package.json` 里声明 `dsh.client`，浏览器半边放在 `exports["./client"]`
-2. 往设置页的 `settings.plugins.tab` 这个 list slot 里注册一个组件
-3. 用 `ctx.configForms.get('away-notify')` 读写值（`getSnapshot` / `subscribe` / `set` / `unset`）
-4. 用 `ctx.configForms.whileServed(['away-notify'], …)` 跟随命名空间：宿主没装本插件时，
-   设置页里不留任何痕迹
+原生设置页（`settings.plugins.tab` + `dsh.client`）是更"正统"的做法，但本插件**试过并且失败了** ——
+加上 `dsh.client` 声明之后 **DSH 直接起不来**。这段经历值得留着：
 
-> ⚠️ **客户端半边必须自包含**：DSH 只**服务**这个文件、不打包它
-> （`clientModules.clientPath(id)` 返回 bundle 绝对路径，`rebuilt(id)` 是外部构建器的钩子），
-> 所以 `src/client.mjs` 里除了 `react` 不能有任何 import —— 连相对导入都不行。
-> 因此字段表在客户端内联了一份，`test/client.test.mjs` 负责钉住它和宿主 schema 不漂移。
+- **只有宿主半边的插件不会有配置表单。** 装进真实 DSH 后卡片只显示「完整名称 / 配置状态 /
+  运行状态」三行；拿装了半年的 `qq-mode-console` 做对照也一样（它的注释写着
+  「没有 browser/client 半，不会自动生成 WebUI 设置卡片」）。
+- **DSH 的客户端 bundle 是「用 CJS 模块系统包装的已构建产物」**，不是 ESM 源码。
+  从它自己的 `lib/client.js` 能看出形态：
+  `(function (module, exports, require) { … exports.apply = apply; exports.inject = inject; return module.exports })`，
+  还有 `require.async("./client.pdf.js")` 这种分块加载。把带 `import` 的源码交给它 = 往函数体里塞
+  `import` → 语法错误 → 抛错。而 DSH 文档写着：客户端插件扫描是**同步**的，任何一个条目
+  **声明写坏**或 **bundle 找不到**都会聚合成一次响亮的抛错（**FAILED fiber**）⇒ **整个应用起不来**。
+  所以要走这条路，必须先引入**构建步骤**。
+- **桌面端连 `tapIndex` 都用不上**：桌面壳的 `index.html` 从安装包静态 dist 直出，永远不经过宿主的
+  `renderIndex()`。
+
+所以改用**宿主端自己服务面板** —— 全部是宿主代码，出错最多是面板不显示，**不可能让 DSH 起不来**。
+
+### 面板怎么进到界面里（桌面端）
+
+桌面端唯一的注入通道是 **`webserver/index-inject`** 事件推的结构化行，宿主启动时
+`collectIndexInjections()` **收集一次**后经 IPC 交给渲染层，**没有任何刷新路径**。三个要点：
+
+1. **注册必须是 `apply()` 的第一件事** —— 晚了就永远进不了那张表（`dsh-whale-widget` 的 #152/#153 就是这个竞态）。
+2. **只能用内联 `kind: 'script'` 行，绝不能用 `script-src`**：页面侧解释器对两者处理**不对称** ——
+   内联行是 `createElement + textContent + append`，没有 await，不可能"加载失败"；而 `script-src` 走
+   `await loadScript(src)`，失败即 reject，那个 reject 会 reject 掉 `__DSH_BOOT_READY__` ⇒ **应用起不来**。
+3. **内联那段代码自己建 `<script src>` 并吞掉 `onerror`** —— 路由在就正常加载，路由不在就静默失败。
+
+这三条都是从 `dsh-whale-widget` 的实测注释里学来的（它为此踩过 issue #152/#153/#154）。本插件的
+`test/panel.test.mjs` 把每条都钉成了用例。
+
+### 安全
+
+写接口自带**信任栅栏**：只允许回环 Host（`localhost` / `127.0.0.0/8` 逐段校验 / `::1`）、
+带 `Origin` 时必须与 Host 同源、`Sec-Fetch-Site: cross-site` 一律拒 —— 防 DNS 重绑定与跨站写入。
+
+**密码不回显**：`smtpPass` 永远不下发到浏览器（面板那一栏是「留空即不修改」），
+这与 schema 上 `role('secret')` 的意图一致。
 
 ### 命名空间要能被写入的三个条件
 
+即使现在走宿主端面板，命名空间那三个条件仍然成立（它决定的是**程序化读写**能不能生效）。
 不重启 DSH 也能先看清命名空间长什么样：
 
 ```sh
@@ -223,7 +233,7 @@ Subject: [DSH] 任务已结束，5.0 分钟无人应答 · 修复登录接口超
 ```sh
 pnpm install                         # 2 个 devDependency：@deepseek-ai/schemastery、yaml
 pnpm run check                       # 一条命令跑完全部检查（与 CI 完全相同）
-node --test test/                    # 122 个用例
+node --test test/                    # 140 个用例
 node scripts/demo.mjs                # 端到端演示（虚拟时钟，不发真实邮件）
 node scripts/print-settings.mjs      # 打印设置卡片（面板）的字段表
 node scripts/inspect-session.mjs     # 读出你本机 DSH 的真实事件契约
@@ -264,7 +274,9 @@ src/summary.mjs        事件折叠 + 摘要渲染 + 抑制规则
 src/transports.mjs     outbox 落盘 + 自研极简 SMTP（只用 node:net / node:tls）
 src/config.mjs         volatile 解包 + 扁平配置归一化
 src/index.mjs          createNotifier() 接线层 + apply() cordis 入口
-src/client.mjs         客户端半边：设置页里的配置表单（**自包含**，只 import react）
+src/field-spec.mjs     22 个字段的规格（标签/分组/范围）—— 面板的单一来源
+src/webpanel.mjs       宿主端面板：注入行 + 路由 + 信任栅栏 + 浏览器脚本
+src/panel-config.mjs   覆盖层配置（白名单 + 类型收敛 + 原子写）
 test/dwell.test.mjs            状态机
 test/summary.test.mjs          折叠与渲染
 test/smtp.test.mjs             对着真的 TCP 假 SMTP 服务器跑完整对话
@@ -274,7 +286,8 @@ test/settings.test.mjs         设置卡片（schema 审计 + volatile 语义 + 
 test/cordis-ctx.test.mjs       真实 cordis ctx 形状下的启动鲁棒性（Proxy 裸读会抛）
 test/diag.test.mjs             诊断日志（含「日志里绝不能出现密码」的断言）
 test/docs.test.mjs             README 结构守卫（重复标题 / 锚点 / 相对链接）
-test/client.test.mjs           客户端半边守卫（字段表不漂移 / 自包含 / dsh.client 声明合法）
+test/panel.test.mjs            面板（覆盖层 / 注入行 / 信任栅栏 / 路由 / 真 HTTP 冒烟）
+test/field-spec.test.mjs       字段规格与 schema 不漂移
 test/ci-config.test.mjs        CI / 发布配置（真解析 workflow YAML，不是正则猜）
 test/fixtures/real-events.mjs  真实事件样本，逐字抄自本机会话日志
 scripts/check.mjs              全量检查入口（本地与 CI 同一条命令）
@@ -330,7 +343,7 @@ node scripts/inspect-session.mjs --out report.txt   # 落盘（Windows 终端代
 
 `@deepseek-ai/schemastery` 的 schema 能 `toJSON()`，所以命名空间的大部分性质能在没有 DSH 的情况下断言：22 个字段**全部**是 volatile（漏标就不会出现在表单里）、密码字段是 `role: 'secret'`、字段集与默认值一一对应、`cordis.patch.yml` 的 entry id 等于命名空间。
 
-装进真实 DSH 后，卡片显示 `include:away-notify` + **配置状态：已启用** —— 说明 entry id 正确、`Config` 被读到、schema 校验通过。但**没有配置表单**；对照实验（`qq-mode-console` 也一样）确认原因是插件缺客户端半边，详见[面板](#面板设置卡片与配置表单)一节。
+装进真实 DSH 后，卡片显示 `include:away-notify` + **配置状态：已启用** —— 说明 entry id 正确、`Config` 被读到、schema 校验通过。但那张卡片上**没有配置表单**（`qq-mode-console` 做对照也一样），所以配置界面走的是[面板](#面板配置界面)那条路。
 
 顺手挖到 volatile 的真实语义，这个坑不踩一次不会知道：
 
@@ -382,8 +395,8 @@ node scripts/inspect-session.mjs --out report.txt   # 落盘（Windows 终端代
   `pnpm run verify:smtp --probe` 对着 `smtp.qq.com:465` 验证通过（服务器还声明了
   `AUTH LOGIN PLAIN`，正好对上实现的回落顺序）；但带真实凭据发出并收到邮件这一步
   需要你自己的授权码才能验，脚本已经准备好（`pnpm run verify:smtp`）
-- 设置表单在**真实浏览器里**的渲染 —— `src/client.mjs` 已经写好并通过静态守卫，
-  但客户端半边的加载路径（`dsh.client` 扫描 → bundle route）离线跑不了，需要重启 DSH 看
+- 面板在**真实界面里**的显示 —— 注入行/路由/信任栅栏/浏览器脚本都过了用例（含真 HTTP 冒烟），
+  但「桌面壳把注入行应用到页面上、按钮真的出现」这一步离线跑不了，需要重启 DSH 看
 - 未在 macOS / Linux 上验证
 
 ## 发布
@@ -450,7 +463,7 @@ git push origin main --tags
 ### 本地与 CI 用同一条命令
 
 ```sh
-pnpm run check          # 语法 + 122 个用例 + demo + 设置预览 + 卫生检查 + 发布产物检查
+pnpm run check          # 语法 + 140 个用例 + demo + 设置预览 + 卫生检查 + 发布产物检查
 pnpm run check:hygiene  # 只跑敏感信息扫描
 pnpm run check:tarball  # 只跑「真打一个包再核对内容」
 ```
@@ -514,9 +527,9 @@ TLS ✓ 已加密    AUTH ✓ 服务器要求认证    282 ms
 
 - [x] ~~真实进程端到端验证~~ —— 已完成：装进 desktop profile，真实 DSH 里跑通，
   设置页显示「运行状态：运行中」，5 分钟静默后 `outbox` 里出现了正确的提醒
-- [x] ~~带表单的面板~~ —— 客户端半边（`src/client.mjs`）已写好并通过静态守卫，
-  但 `dsh.client` 声明**暂时摘掉了**：打开它会让 DSH 起不来（见
-  [面板](#面板设置卡片与配置表单)一节的说明）。要重新打开，先确认 DSH 接受的 bundle 形态
+- [x] ~~带表单的面板~~ —— 已完成，走的是**宿主端自己服务面板**的路子：界面左下角一个「提醒」
+  按钮，点开是分四组的 22 个字段，保存写入覆盖层并实时生效。原生设置页（`dsh.client`）那条路
+  试过但会让 DSH 起不来，原因见[面板](#面板配置界面)一节（客户端 bundle 需要构建步骤）
 - [ ] 用 `tree/settled` 语义替代裸 `turn/end`，把子代理树也纳入「真的干完了」
 - [ ] 客户端 presence：`document.hidden` / focus 回传宿主，让「人在不在」有比 `user/message` 更早的信号
 - [ ] 卡片里显示运行状态（待发提醒数、最近一次投递），而不只是配置

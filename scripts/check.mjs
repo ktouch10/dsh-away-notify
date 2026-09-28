@@ -23,6 +23,36 @@ function list (dir, filter) {
     .map(f => path.join(dir, f))
 }
 
+/**
+ * 删掉测试可能留下的覆盖层配置。
+ *
+ * 为什么需要：`--test-isolation=none` 下所有测试文件**共用同一个 process.env**，而覆盖层路径
+ * 是从 `DSH_AWAY_NOTIFY_DIAG_DIR` 推出来的 —— 于是所有用例共用一个 `config.json`。
+ * 上一轮运行留下的那份会被这一轮所有 `apply()` 读到（真发生过：残留的 `enabled: true`
+ * 让这一轮所有「enabled=false」的用例全红）。
+ */
+function cleanTestOverlays () {
+  const base = path.join(ROOT, '.test-tmp')
+  if (!fs.existsSync(base)) return
+  const stack = [base]
+  while (stack.length) {
+    const dir = stack.pop()
+    let entries = []
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) stack.push(full)
+      else if (entry.name === 'config.json') {
+        try { fs.rmSync(full, { force: true }) } catch { /* 删不掉也无所谓 */ }
+      }
+    }
+  }
+}
+
 const SOURCES = [
   ...list('src', f => f.endsWith('.mjs')),
   ...list('test', f => f.endsWith('.mjs')),
@@ -75,7 +105,14 @@ const STEPS = [
   },
   {
     label: `单元 / 集成测试（${TESTS.length} 个文件${ISOLATION_FLAGS.length ? `，${ISOLATION_FLAGS[0]}` : '，默认隔离'}）`,
-    run: () => TESTS.length > 0 && run([...ISOLATION_FLAGS, '--test', ...TESTS], 'tests')
+    run: () => {
+      // 测试之间会共用 process.env 与 .test-tmp，所以**先清掉上一轮留下的覆盖层配置**。
+      // 不清的话，上一轮某个用例写进 ~/.dsh/.../config.json 的等价物（.test-tmp/*/config.json）
+      // 会被这一轮所有 apply() 读到 —— 真发生过：上一轮失败留下的 config.json 里带着
+      // enabled:true，导致这一轮所有「enabled=false」的用例都失败。
+      cleanTestOverlays()
+      return TESTS.length > 0 && run([...ISOLATION_FLAGS, '--test', ...TESTS], 'tests')
+    }
   },
   {
     label: '端到端演示（demo）',

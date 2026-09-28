@@ -106,12 +106,14 @@ test('settings 服务晚到时会延迟绑定（dsh-settings-file 是异步初�
 
   const instance = apply(ctx, { enabled: true, tickSeconds: 3600 })
   assert.equal(calls.length, 0, '此刻还没有 settings 服务')
-  assert.equal(injects.length, 1, '应该挂一个延迟绑定')
-  assert.deepEqual(injects[0].deps, ['settings'])
+  // 面板也会 inject(['webServer']) —— 这里只关心 settings 那一条
+  const settingsInject = injects.find(i => i.deps.includes('settings'))
+  assert.ok(settingsInject, '应该为 settings 挂一个延迟绑定')
+  assert.deepEqual(settingsInject.deps, ['settings'])
 
   // 服务出现后，cordis 会用带该服务的 ctx 调回调
   const late = cordisLikeCtx({ settings: { register: (...args) => { calls.push(args); return { ok: true } } } })
-  injects[0].cb(late.ctx)
+  settingsInject.cb(late.ctx)
   assert.equal(calls.length, 1, '服务出现后应该完成注册')
   assert.equal(calls[0][0], NAMESPACE)
   instance.dispose()

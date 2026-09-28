@@ -42,6 +42,15 @@ export function loadSchema () {
   }
 }
 
+/**
+ * 枚举字段的允许值。
+ * 一份来源，两个用处：schema 的 z.union 与面板/覆盖层的写入校验。
+ */
+export const SETTINGS_ENUMS = Object.freeze({
+  transport: Object.freeze(['outbox', 'smtp']),
+  language: Object.freeze(['zh', 'en'])
+})
+
 /** 设置卡片的默认值。也是 config.mjs 的默认值来源，保证两边不会漂移。 */
 export const SETTINGS_DEFAULTS = Object.freeze({
   enabled: true,
@@ -120,10 +129,10 @@ export function buildConfig (z) {
     minToolCalls: desc(V(z.number().default(SETTINGS_DEFAULTS.minToolCalls)), 'minToolCalls'),
     suppressEmptyTurns: desc(V(z.boolean().default(SETTINGS_DEFAULTS.suppressEmptyTurns)), 'suppressEmptyTurns'),
 
-    transport: desc(V(z.union(['outbox', 'smtp']).default(SETTINGS_DEFAULTS.transport)), 'transport'),
+    transport: desc(V(z.union(SETTINGS_ENUMS.transport).default(SETTINGS_DEFAULTS.transport)), 'transport'),
     outboxDir: desc(V(z.string().default(SETTINGS_DEFAULTS.outboxDir)), 'outboxDir'),
     subjectPrefix: desc(V(z.string().default(SETTINGS_DEFAULTS.subjectPrefix)), 'subjectPrefix'),
-    language: desc(V(z.union(['zh', 'en']).default(SETTINGS_DEFAULTS.language)), 'language'),
+    language: desc(V(z.union(SETTINGS_ENUMS.language).default(SETTINGS_DEFAULTS.language)), 'language'),
     excerptChars: desc(V(z.number().default(SETTINGS_DEFAULTS.excerptChars)), 'excerptChars'),
     allowInsecureAuth: desc(V(z.boolean().default(SETTINGS_DEFAULTS.allowInsecureAuth)), 'allowInsecureAuth'),
 

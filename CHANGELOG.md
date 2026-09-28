@@ -8,34 +8,57 @@
 
 ### Added
 
-- **带表单的面板（客户端半边）—— 实现已完成，但暂不挂出**（原因见下方「已撤回」）。
-  之前只有宿主半边，设置页里那张卡片只有
-  「完整名称 / 配置状态 / 运行状态」三行，**没有配置项** —— 拿装了半年的
+- **带表单的面板** —— 界面左下角一个小小的「提醒」按钮，点开是分四组（基本 / 触发规则 /
+  投递 / SMTP）的 22 个字段，保存写入覆盖层并**实时生效**。
+  之前那张卡片只有「完整名称 / 配置状态 / 运行状态」三行，**没有配置项** —— 拿装了半年的
   `qq-mode-console` 做对照也一样（它的注释写着「没有 browser/client 半，不会自动生成
-  WebUI 设置卡片」）。客户端半边本身已经写好：
-  - 浏览器半边放在 `exports["./client"]`（`src/client.mjs`）
-  - 往设置页的 `settings.plugins.tab` 注册一张表单，按「基本 / 触发规则 / 投递 / SMTP」
-    分组渲染 22 个字段
-  - 用 `ctx.configForms` 读写（`getSnapshot` / `subscribe` / `set` / `unset`），
-    改完立即生效；每个被覆盖过的字段旁边有「恢复默认」
-  - 用 `whileServed` 跟随命名空间：宿主没装本插件时，设置页里不留痕迹
+  WebUI 设置卡片」）。
+
+  面板走的是**宿主端自己服务**的路子（`ctx.webServer.register` + `webserver/index-inject`
+  注入行），不是原生设置页。三个关键点，全部来自 `dsh-whale-widget` 踩过的坑：
+
+  1. **注入行的注册必须是 `apply()` 的第一件事** —— 桌面端那张表由宿主在启动时**一次性收集**
+     （`collectIndexInjections()` → IPC → 渲染层），**没有刷新路径**，晚了就永远进不了表。
+  2. **只能用内联 `kind: 'script'` 行，绝不能用 `script-src`**：页面侧解释器对两者处理不对称 ——
+     内联行是 `createElement + textContent + append`，没有 await，不可能"加载失败"；而
+     `script-src` 走 `await loadScript(src)`，失败即 reject，那个 reject 会 reject 掉
+     `__DSH_BOOT_READY__` ⇒ **整个应用起不来**。
+  3. **内联那段代码自己建 `<script src>` 并吞掉 `onerror`** —— 路由在就正常加载，路由不在就静默失败。
+
+  配套：
+  - **覆盖层配置**（`~/.dsh/dsh-away-notify/config.json`）：白名单 + 类型收敛（布尔/数字/枚举）
+    + 原子写入（临时文件 + rename）。优先级 `schema 默认值 < cordis.patch.yml < 覆盖层`，
+    面板里被覆盖过的字段有边框提示，可一键「清除全部覆盖」。
+  - **信任栅栏**：只允许回环 Host（`127.0.0.0/8` 逐段校验）、`Origin` 必须与 Host 同源、
+    `Sec-Fetch-Site: cross-site` 一律拒 —— 防 DNS 重绑定与跨站写入。
+  - **密码不回显**：`smtpPass` 永不下发到浏览器。
+  - 只有「静默时长 / 最晚推迟」改动需要重建调度器（那两个值是构造时捕获的）；
+    其余字段都是使用时读取，原地生效。`tickSeconds` 只重启定时器。
 - **`scripts/verify-smtp.mjs`（`pnpm run verify:smtp`）**：拿插件**自己的** SMTP 代码
   去连真实邮件服务器。`--probe` 只做连接 + TLS + EHLO（不需要账号、不发信、不送凭据），
-  真发模式凭据只从环境变量读、输出全程脱敏。失败时按错误类型给排查提示
+  真发模式凭据只从环境变量读取、输出全程脱敏。失败时按错误类型给排查提示
 - `sendSmtp` 新增 `probeOnly` 能力（探测与真发信走**同一段**连接/TLS/EHLO 代码路径）
 
-### 已撤回
+### 走过的弯路：原生设置页（`dsh.client`）试过，会让 DSH 起不来
 
-- **`dsh.client` 声明**。加上它之后 **DSH 起不来了**（打不开 / 报错退出）。
-  证据：那两次失败的启动里，宿主半边都正常 apply 了（`status.log` 有完整记录），
-  说明问题出在启动**后半段的客户端插件清单**上 —— 而 `dsh.client` 是那次唯一新增的
-  启动路径改动。DSH 自己的文档也警告过这一点：`clientModules` 的
-  「Construction runs the activation scan **synchronously** — a malformed declaration or
-  **missing bundle** among the already-loaded entries aggregates into one loud throw
-  (**FAILED fiber**; the boot activation audit reports it)」。
-  所以先摘掉声明，宿主半边照常工作；等能用可控的启动确认 DSH 接受的 bundle 形态
-  （是单个已构建产物？还是会被改写？）之后再打开。`test/client.test.mjs` 里有一条
-  刻意的「减速带」断言，防止没搞清原因就重新打开。
+现在面板的形态是被这次失败"逼"出来的，过程值得留着：
+
+- 加上 `dsh.client` 声明之后 **DSH 打不开**。当时唯一的抓手是插件自己的诊断日志 ——
+  它显示**两次失败的启动里宿主半边都正常 apply 了**（`session/event 订阅成功`、`已启用`），
+  所以炸的是启动**后半段的客户端插件清单**，而那正是当时唯一新增的启动路径改动。
+- DSH 文档对这个失败模式有专门警告：`clientModules` 的激活扫描是**同步**的，已加载条目里
+  只要有一个**声明写坏**或 **bundle 找不到**，就会聚合成一次响亮的抛错（**FAILED fiber**）。
+- 真正的原因：**DSH 的客户端 bundle 是"用 CJS 模块系统包装的已构建产物"**，不是 ESM 源码。
+  从它自己的 `lib/client.js` 能看出形态（`(function (module, exports, require) { …
+  exports.apply = apply; exports.inject = inject; return module.exports })`，还有
+  `require.async("./client.pdf.js")` 这类分块加载）。把带 `import` 的源码交给它 = 往函数体里
+  塞 `import` → 语法错误 → 抛错。**要走这条路，必须先引入构建步骤。**
+- 另外桌面端连 `tapIndex` 都用不上（桌面壳的 `index.html` 从安装包静态 dist 直出，
+  永远不经过宿主的 `renderIndex()`）。
+
+所以撤掉声明、删掉那份不可用的客户端半边，改成宿主端面板 —— **出错最多是面板不显示，
+不可能让 DSH 起不来**。原来的「减速带」断言（`package.json` 不该有 `dsh.client`）也一并去掉了，
+因为现在根本没有那个声明。
 
 ### 已用真实服务器验证
 

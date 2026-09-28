@@ -313,9 +313,55 @@ test('ctx.on 不可用时只告警，不抛错', () => {
   })
 })
 
-test('enabled=false 时完全不监听', () => {
+test('enabled=false 时不订阅会话事件，但注入行照挂', () => {
   const ctx = fakeCtx()
   const instance = apply(ctx, { enabled: false })
-  assert.equal(ctx.handlers.size, 0)
+  assert.equal(ctx.handlers.has('session/event'), false, 'enabled=false 不该订阅会话事件')
+  assert.equal(ctx.handlers.has('webserver/index-inject'), true, '注入行必须照挂 —— 否则关掉插件后就再也没有界面能把它打开')
   assert.equal(instance.notifier, null)
+})
+
+test('面板 writeState：关闭状态改配置不抛，总开关能实时开关', async () => {
+  // ⚠️ 覆盖层落在 DSH_AWAY_NOTIFY_DIAG_DIR 那个目录里。`--test-isolation=none` 下所有测试文件
+  // **共用同一个 process.env**，最后被 import 的那个文件设的值生效 —— 所以不能硬编码路径，
+  // 要用 apply() 实际读到的那个（readState().overlayFile），否则清理会删错文件、污染别的用例。
+  let overlayFile = null
+
+  try {
+    const ctx = fakeCtx()
+    const instance = apply(ctx, { enabled: false, dwellMinutes: 5 })
+    assert.equal(instance.notifier, null)
+
+    overlayFile = instance.readState().overlayFile
+    await fs.rm(overlayFile, { force: true })
+    // 清掉之后再重新应用一次，确保从干净状态开始
+    instance.dispose()
+    const fresh = apply(ctx, { enabled: false, dwellMinutes: 5 })
+    assert.equal(fresh.notifier, null)
+
+    // 关闭状态下改「静默时长」：以前会撞 TDZ（restartSubscription 里引用了尚未初始化的 const）
+    assert.doesNotThrow(() => fresh.writeState({ dwellMinutes: 8 }))
+    assert.equal(fresh.config.dwellMinutes, 8)
+    assert.equal(fresh.notifier, null, '仍然关闭时不该建 notifier')
+
+    // 面板打开总开关 → 立即订阅
+    fresh.writeState({ enabled: true })
+    assert.equal(fresh.config.enabled, true)
+    assert.equal(ctx.handlers.has('session/event'), true, '打开后应立刻订阅')
+    assert.ok(fresh.notifier, '打开后应有 notifier')
+
+    // 打开状态下改静默时长 → 重建状态机（dwellMs 是构造时捕获的）
+    const before = fresh.notifier
+    fresh.writeState({ dwellMinutes: 2 })
+    assert.notEqual(fresh.notifier, before, '改静默时长应该重建状态机')
+    assert.equal(fresh.config.dwellMinutes, 2)
+
+    // 面板再关掉 → 取消订阅
+    fresh.writeState({ enabled: false })
+    assert.equal(ctx.handlers.has('session/event'), false, '关掉后应取消订阅')
+
+    fresh.dispose()
+  } finally {
+    if (overlayFile) await fs.rm(overlayFile, { force: true })
+  }
 })

@@ -6,7 +6,6 @@
   "main": "src/index.mjs",
   "exports": {
     ".": "./src/index.mjs",
-    "./client": "./src/client.mjs",
     "./lib/*": "./src/*",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
