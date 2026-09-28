@@ -128,8 +128,44 @@ test('长主题被切成多段 encoded-word，每段都不超过 75 字符', () 
   }
 })
 
-test('完整 SMTP 对话：信封与正文都正确', async () => {
+test('探测模式：只握手，不发信也不送凭据', async () => {
   const fake = createFakeSmtp()
+  const port = await fake.listen()
+  try {
+    const result = await sendSmtp({
+      // 探测模式不该要求收件人 —— 只想知道「连得上、TLS 通、服务器说什么」
+      smtp: { ...smtpConfig(port), to: [] },
+      password: { value: '', source: 'none' },
+      mail: null,
+      probeOnly: true
+    })
+
+    assert.equal(result.probed, true)
+    assert.equal(result.host, '127.0.0.1')
+    assert.equal(result.tlsActive, false, '假服务器是明文，探测应如实报告')
+    assert.equal(result.authAdvertised, true)
+    assert.ok(result.capabilities.length > 0, '应该报告 EHLO 能力')
+    assert.deepEqual(fake.state.transactions, [], '探测不该产生任何邮件事务')
+    assert.equal(fake.state.authAttempts, 0, '探测绝不该尝试认证')
+  } finally {
+    await fake.close()
+  }
+})
+
+test('探测模式：服务器不可达时明确抛错并带上原因', async () => {
+  // 关掉的端口：连接必然失败
+  const fake = createFakeSmtp()
+  const port = await fake.listen()
+  await fake.close()
+
+  await assert.rejects(
+    () => sendSmtp({ smtp: smtpConfig(port), password: { value: '', source: 'none' }, mail: null, probeOnly: true }),
+    // 端口关掉后是 ECONNREFUSED（原样抛 socket 错误）；超时则用带 label 的消息
+    error => /ECONNREFUSED|连接 .* 失败|超时/.test(String(error?.message ?? ''))
+  )
+})
+
+test('完整 SMTP 对话：信封与正文都正确', async () => {  const fake = createFakeSmtp()
   const port = await fake.listen()
   try {
     const result = await sendSmtp({

@@ -232,13 +232,17 @@ export async function sendSmtp ({
   password,
   mail,
   timeoutMs = 20000,
-  allowInsecureAuth = false
+  allowInsecureAuth = false,
+  probeOnly = false
 }) {
   if (!smtp?.host) throw new Error('未配置 smtp.host')
   const from = bareAddress(smtp.from || smtp.user)
   const recipients = (smtp.to ?? []).map(bareAddress).filter(Boolean)
-  if (!from) throw new Error('未配置发件人（smtp.from / smtp.user）')
-  if (!recipients.length) throw new Error('未配置收件人（smtp.to）')
+  // 探测模式只验「连得上、TLS 通、EHLO 说什么」，不需要发件人和收件人
+  if (!probeOnly) {
+    if (!from) throw new Error('未配置发件人（smtp.from / smtp.user）')
+    if (!recipients.length) throw new Error('未配置收件人（smtp.to）')
+  }
 
   const port = smtp.port || (smtp.secure ? 465 : 587)
   const steps = []
@@ -282,6 +286,35 @@ export async function sendSmtp ({
       upgraded = true
       channel.write(`EHLO ${os.hostname() || 'localhost'}`)
       ehlo = await expect([250], 'EHLO(STARTTLS)')
+    }
+
+    // 只探测：连接 + TLS（隐式或 STARTTLS）+ EHLO。不发信、不送凭据。
+    // 这是 scripts/verify-smtp.mjs --probe 的实现，也复用了上面完全相同的连接代码路径，
+    // 所以「探测通过」和「真发信」验的是同一段 TLS/EHLO 逻辑。
+    if (probeOnly) {
+      const capabilities = ehlo
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .slice(1) // 首行是服务器标识，后面才是能力
+      try {
+        channel.write('QUIT')
+        await expect([221], 'QUIT')
+      } catch {
+        // 探测器不在乎 QUIT 成不成功
+      }
+      return {
+        ok: true,
+        transport: 'smtp',
+        probed: true,
+        host: smtp.host,
+        port,
+        tlsActive: Boolean(smtp.secure || upgraded),
+        starttlsAdvertised: /STARTTLS/i.test(ehlo),
+        authAdvertised: /AUTH/i.test(ehlo),
+        capabilities,
+        steps
+      }
     }
 
     const tlsActive = Boolean(smtp.secure || upgraded)
