@@ -124,22 +124,30 @@ jobs:
       #     2026-09-28 发 0.1.2 时 publish 打印了「Publishing to registry.npmjs.org」
       #     「Signed provenance statement」「Provenance statement published to transparency log」
       #     「Your package is being processed and may take a few minutes to become available」，
-      #     步骤结论 success —— 而我在本机用 registry / npmmirror 两条路径都查不到 0.1.2
-      #     （后来证明是**我这边读到的是缓存**，包其实发出去了）。
-      #     所以这一步轮询等它出现：等不到就让 CI 红，而不是让人以为发成功了。
+      #     步骤结论 success —— 而 registry 上查不到它。
+      #
+      #     2026-09-28 又碰到一次（0.1.3），这次是**在 runner 的新鲜网络上**，所以排除了
+      #     「我本地缓存」这个解释：publish 19 秒完成，然后轮询 122 秒都没看到 0.1.3。
+      #     两次合起来可以确认：**npm 的写路径立刻接受，读路径（npm view / registry GET）
+      #     有十几分钟的复制延迟** —— 0.1.2 就是 09:28 发布、09:34 重发时 npm 已回
+      #     「cannot publish over the previously published versions」、而直到 09:38
+      #     的 npm view 才第一次看到它。
+      #
+      #     所以窗口要开得足够宽（12 分钟），否则守卫只会制造假红。
+      #     它仍然有用：真正「发布没生效」会让这一段在 12 分钟后失败。
       - name: 确认这次发布真的生效
         run: |
           name="$(node -p "require('./package.json').name")"
           want="$(node -p "require('./package.json').version")"
-          echo "核对 $name@$want 是否已在 registry 上"
-          for i in $(seq 1 12); do
+          echo "核对 $name@$want 是否已在 registry 上（容忍 npm 读路径的复制延迟，最多等 12 分钟）"
+          for i in $(seq 1 48); do
             got="$(npm view "$name@$want" version 2>/dev/null || true)"
             if [ "$got" = "$want" ]; then
               echo "✓ $name@$want 已上架（第 $i 次查询）"
               exit 0
             fi
-            echo "  第 $i 次还没看到，10 秒后再试…"
-            sleep 10
+            echo "  第 $i 次还没看到，15 秒后再试…"
+            sleep 15
           done
           echo "::error::npm publish 之后 registry 上仍然没有 $name@$want —— 发布并未真正生效"
           exit 1
