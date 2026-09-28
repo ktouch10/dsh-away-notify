@@ -64,12 +64,20 @@ dsh plugin --profile desktop add link:/path/to/dsh-away-notify
 > > `clientModules` 的构造会**同步**跑激活扫描 —— 已加载条目里只要有一个**声明写坏**或
 > > **bundle 找不到**，就会聚合成一次响亮的抛错（**FAILED fiber**，启动激活审计会报出来）。
 >
-> 我猜错的地方：以为 `exports["./client"]` 指向一个手写的 `.mjs` 就够了。但 DSH 只**服务**
-> 这个文件、**不打包**它（`clientPath(id)` 返回 bundle 绝对路径，`rebuilt(id)` 是外部构建器
-> 的钩子）—— 它期待的很可能是一个**已构建好的产物**，而不是带 `import` 的源码。
+> 我猜错的地方（两处）：以为 `exports["./client"]` 指向一个手写的 `.mjs` 就够了。
+> 但 DSH 的客户端 bundle 是**用 CJS 模块系统包装的已构建产物** —— 从 DSH 自己的
+> `lib/client.js` 能看出形态：
 >
-> 所以先摘掉声明（`src/client.mjs` 留着，实现本身是对的），等能用可控的启动确认 DSH 接受的
-> bundle 形态之后再打开。**当前配置走 `cordis.patch.yml`，这条路实测可用。**
+> ```js
+> (function (module, exports, require) { … exports.apply = apply; exports.inject = inject; return module.exports })
+> ```
+>
+> 还有 `require.async("./client.pdf.js")` 这种分块加载。把带 ESM `import` 的源码交给它，
+> 等于往函数体里塞 `import` —— 语法错误 → 抛错 → **FAILED fiber**。所以要做客户端半边，
+> 得先有**构建步骤**把它打成那种包装形态，而不是直接交源码。
+>
+> 所以先摘掉声明（`src/client.mjs` 留着，实现本身是对的），等把构建补上再打开。
+> **当前配置走 `cordis.patch.yml`，这条路实测可用。**
 
 配置有两条路，写的是**同一批扁平键**：`cordis.patch.yml`（已验证可用），以及设置页里的一张表单（待挂出）。
 

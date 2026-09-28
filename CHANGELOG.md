@@ -51,10 +51,12 @@ smtp.qq.com:465
 
 ### 安全 / 工程
 
-- 客户端半边**必须自包含**（DSH 只服务文件、不打包它），所以字段表在客户端内联了一份；
-  `test/client.test.mjs` 钉住它和宿主 schema 不漂移，并断言「除了 react 没有任何 import」
-- 同一支用例还校验 `dsh.client` 声明合法 —— DSH 的文档写着：声明写坏或 bundle 找不到会
-  **聚合成一次响亮的抛错（FAILED fiber）**，插件在设置页会显示成「启动失败」
+- 客户端半边（`src/client.mjs`）暂时**不挂出**：DSH 要的是用 CJS 模块系统包装的**已构建产物**
+  （见下面「已撤回」），直接交带 ESM `import` 的源码会让 DSH 起不来
+- 字段表在客户端内联了一份（因为那个产物必须自包含），`test/client.test.mjs` 钉住它和宿主
+  schema 不漂移，并断言「除了 react 没有任何 import」
+- 同一支用例里有一条**刻意反向**的断言：`package.json` 目前**不应**声明 `dsh.client` ——
+  这是道减速带，防止没搞清 bundle 形态就重新打开
 
 ## [0.1.1]
 
