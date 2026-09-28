@@ -4,6 +4,44 @@
 
 ## [Unreleased]
 
+## [0.1.2]
+
+### Added
+
+- **带表单的面板（客户端半边）**。之前只有宿主半边，设置页里那张卡片只有
+  「完整名称 / 配置状态 / 运行状态」三行，**没有配置项** —— 拿装了半年的
+  `qq-mode-console` 做对照也一样（它的注释写着「没有 browser/client 半，不会自动生成
+  WebUI 设置卡片」）。现在补上了客户端半边：
+  - `package.json` 声明 `dsh.client`，浏览器半边在 `exports["./client"]`
+  - 往设置页的 `settings.plugins.tab` 注册一张表单，按「基本 / 触发规则 / 投递 / SMTP」
+    分组渲染 22 个字段
+  - 用 `ctx.configForms` 读写（`getSnapshot` / `subscribe` / `set` / `unset`），
+    改完立即生效；每个被覆盖过的字段旁边有「恢复默认」
+  - 用 `whileServed` 跟随命名空间：宿主没装本插件时，设置页里不留痕迹
+- **`scripts/verify-smtp.mjs`（`pnpm run verify:smtp`）**：拿插件**自己的** SMTP 代码
+  去连真实邮件服务器。`--probe` 只做连接 + TLS + EHLO（不需要账号、不发信、不送凭据），
+  真发模式凭据只从环境变量读、输出全程脱敏。失败时按错误类型给排查提示
+- `sendSmtp` 新增 `probeOnly` 能力（探测与真发信走**同一段**连接/TLS/EHLO 代码路径）
+
+### 已用真实服务器验证
+
+```
+smtp.qq.com:465
+  220 newxmesmtplogicsvrszc43-0.qq.com XMail Esmtp QQ Mail Server.
+  250-AUTH LOGIN PLAIN XOAUTH XOAUTH2 ...
+  TLS ✓ 已加密    AUTH ✓ 服务器要求认证    282 ms
+```
+
+这补上了一个真实空白：仓库里的 SMTP 测试对着的是自写的**明文**假服务器，
+隐式 TLS（465）这条分支从没被真实验证过。
+
+### 安全 / 工程
+
+- 客户端半边**必须自包含**（DSH 只服务文件、不打包它），所以字段表在客户端内联了一份；
+  `test/client.test.mjs` 钉住它和宿主 schema 不漂移，并断言「除了 react 没有任何 import」
+- 同一支用例还校验 `dsh.client` 声明合法 —— DSH 的文档写着：声明写坏或 bundle 找不到会
+  **聚合成一次响亮的抛错（FAILED fiber）**，插件在设置页会显示成「启动失败」
+
 ## [0.1.1]
 
 ### Fixed
@@ -64,6 +102,7 @@
   （启动结果、配置摘要**脱敏**、注册与订阅结果、每次决策；256KB 上限；写失败不影响功能）
 - **排查章节**（README「为什么没收到提醒」）
 
-[Unreleased]: https://github.com/ktouch10/dsh-away-notify/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ktouch10/dsh-away-notify/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/ktouch10/dsh-away-notify/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/ktouch10/dsh-away-notify/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ktouch10/dsh-away-notify/releases/tag/v0.1.0

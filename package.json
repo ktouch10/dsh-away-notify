@@ -1,11 +1,12 @@
 {
   "name": "dsh-away-notify",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH plugin: only ping me when the agent has really finished AND I have not come back for N minutes. Configurable dwell, brief result summary, plain SMTP or a local outbox.",
   "type": "module",
   "main": "src/index.mjs",
   "exports": {
     ".": "./src/index.mjs",
+    "./client": "./src/client.mjs",
     "./lib/*": "./src/*",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
@@ -38,6 +39,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
     }
   },
   "scripts": {
@@ -66,16 +74,26 @@
     "reminder"
   ],
   "devDependencies": {
-    "@deepseek-ai/dsh-client-ui-settings": "0.1.7-rc.2",
-    "@deepseek-ai/dsh-client-ui-slots": "0.1.7-rc.2",
     "@deepseek-ai/schemastery": "^3.18.4",
     "yaml": "^2.9.1"
   },
   "peerDependencies": {
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.1.5",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.5",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-client-ui-renderer": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-settings": {
+      "optional": true
+    },
     "@deepseek-ai/schemastery": {
+      "optional": true
+    },
+    "react": {
       "optional": true
     }
   }

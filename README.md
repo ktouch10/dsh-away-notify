@@ -51,30 +51,39 @@ dsh plugin --profile desktop add link:/path/to/dsh-away-notify
 
 卸载：`dsh plugin --profile <profile> remove dsh-away-notify`
 
-## 面板（设置卡片）
+## 面板（设置卡片与配置表单）
 
-> ⚠️ **实测结论：只有宿主半边的插件，卡片上不会有配置表单。**
->
-> 在真实 DSH 里验证过：插件行会正常显示（完整名称 / 配置状态 / 运行状态），
-> 但**没有那 22 个字段**。拿装了半年的 `qq-mode-console` 做对照 —— 它也完全一样，
-> 而它的源码注释写着：「本插件没有 browser/client 半，**不会自动生成 WebUI 设置卡片**」。
->
-> 也就是说 **DSH 的设置表单需要插件带「客户端半边」**（package.json 里的 `dsh.client`
-> 声明 + 浏览器端代码），光有 `ctx.settings.register` + `Config` 只够让命名空间**可读写**
-> （供程序通过设置 API 读写），不足以渲染表单。
->
-> 所以本插件目前的配置方式是 **`cordis.patch.yml`**（完全可用，实测生效）。
-> 带表单的面板在[路线图](#路线图)里。
+配置有两条路，写的是**同一批扁平键**：`cordis.patch.yml`（已验证可用），以及设置页里的一张表单。
 
-`cordis.patch.yml` 这条路是验证过的；卡片上的三个「条件」也各自验证过：
+### 设置表单需要「客户端半边」
 
-不重启 DSH 也能先看清命名空间会长什么样：
+实测结论，值得单独记一笔：**只有宿主半边的插件，设置页里不会有配置表单。**
+
+装进真实 DSH 后，插件行会正常显示（完整名称 / 配置状态 / 运行状态），但**没有那 22 个字段**。
+拿装了半年的 `qq-mode-console` 做对照 —— 它也完全一样，而它的源码注释写着：
+「本插件没有 browser/client 半，**不会自动生成 WebUI 设置卡片**」。
+
+光有 `ctx.settings.register` + `Config` 只够让命名空间**可读写**，不足以渲染表单。
+表单要靠客户端半边，也就是：
+
+1. `package.json` 里声明 `dsh.client`，浏览器半边放在 `exports["./client"]`
+2. 往设置页的 `settings.plugins.tab` 这个 list slot 里注册一个组件
+3. 用 `ctx.configForms.get('away-notify')` 读写值（`getSnapshot` / `subscribe` / `set` / `unset`）
+4. 用 `ctx.configForms.whileServed(['away-notify'], …)` 跟随命名空间：宿主没装本插件时，
+   设置页里不留任何痕迹
+
+> ⚠️ **客户端半边必须自包含**：DSH 只**服务**这个文件、不打包它
+> （`clientModules.clientPath(id)` 返回 bundle 绝对路径，`rebuilt(id)` 是外部构建器的钩子），
+> 所以 `src/client.mjs` 里除了 `react` 不能有任何 import —— 连相对导入都不行。
+> 因此字段表在客户端内联了一份，`test/client.test.mjs` 负责钉住它和宿主 schema 不漂移。
+
+### 命名空间要能被写入的三个条件
+
+不重启 DSH 也能先看清命名空间长什么样：
 
 ```sh
 node scripts/print-settings.mjs
 ```
-
-命名空间要能被程序**写入**，需要三个条件同时成立：
 
 | 条件 | 本插件的做法 | 验证情况 |
 |---|---|---|
@@ -188,7 +197,7 @@ Subject: [DSH] 任务已结束，5.0 分钟无人应答 · 修复登录接口超
 ```sh
 pnpm install                         # 2 个 devDependency：@deepseek-ai/schemastery、yaml
 pnpm run check                       # 一条命令跑完全部检查（与 CI 完全相同）
-node --test test/                    # 112 个用例
+node --test test/                    # 122 个用例
 node scripts/demo.mjs                # 端到端演示（虚拟时钟，不发真实邮件）
 node scripts/print-settings.mjs      # 打印设置卡片（面板）的字段表
 node scripts/inspect-session.mjs     # 读出你本机 DSH 的真实事件契约
@@ -229,6 +238,7 @@ src/summary.mjs        事件折叠 + 摘要渲染 + 抑制规则
 src/transports.mjs     outbox 落盘 + 自研极简 SMTP（只用 node:net / node:tls）
 src/config.mjs         volatile 解包 + 扁平配置归一化
 src/index.mjs          createNotifier() 接线层 + apply() cordis 入口
+src/client.mjs         客户端半边：设置页里的配置表单（**自包含**，只 import react）
 test/dwell.test.mjs            状态机
 test/summary.test.mjs          折叠与渲染
 test/smtp.test.mjs             对着真的 TCP 假 SMTP 服务器跑完整对话
@@ -238,6 +248,7 @@ test/settings.test.mjs         设置卡片（schema 审计 + volatile 语义 + 
 test/cordis-ctx.test.mjs       真实 cordis ctx 形状下的启动鲁棒性（Proxy 裸读会抛）
 test/diag.test.mjs             诊断日志（含「日志里绝不能出现密码」的断言）
 test/docs.test.mjs             README 结构守卫（重复标题 / 锚点 / 相对链接）
+test/client.test.mjs           客户端半边守卫（字段表不漂移 / 自包含 / dsh.client 声明合法）
 test/ci-config.test.mjs        CI / 发布配置（真解析 workflow YAML，不是正则猜）
 test/fixtures/real-events.mjs  真实事件样本，逐字抄自本机会话日志
 scripts/check.mjs              全量检查入口（本地与 CI 同一条命令）
@@ -246,6 +257,7 @@ scripts/check-tarball.mjs      真打一个包再解开核对内容
 scripts/demo.mjs               端到端演示 / 冒烟测试
 scripts/print-settings.mjs     设置卡片字段表预览
 scripts/inspect-session.mjs    会话日志 → 事件契约探针
+scripts/verify-smtp.mjs        拿插件**自己的** SMTP 代码去连真实邮件服务器（凭据只走环境变量）
 scripts/lib/                   扫描规则与 --out 落盘工具
 .github/workflows/             ci.yml（Node 22/24 矩阵 + 零依赖冒烟）、release.yml（OIDC 发布）
 ```
@@ -292,7 +304,7 @@ node scripts/inspect-session.mjs --out report.txt   # 落盘（Windows 终端代
 
 `@deepseek-ai/schemastery` 的 schema 能 `toJSON()`，所以命名空间的大部分性质能在没有 DSH 的情况下断言：22 个字段**全部**是 volatile（漏标就不会出现在表单里）、密码字段是 `role: 'secret'`、字段集与默认值一一对应、`cordis.patch.yml` 的 entry id 等于命名空间。
 
-装进真实 DSH 后，卡片显示 `include:away-notify` + **配置状态：已启用** —— 说明 entry id 正确、`Config` 被读到、schema 校验通过。但**没有配置表单**；对照实验（`qq-mode-console` 也一样）确认原因是插件缺客户端半边，详见[面板](#面板设置卡片)一节。
+装进真实 DSH 后，卡片显示 `include:away-notify` + **配置状态：已启用** —— 说明 entry id 正确、`Config` 被读到、schema 校验通过。但**没有配置表单**；对照实验（`qq-mode-console` 也一样）确认原因是插件缺客户端半边，详见[面板](#面板设置卡片与配置表单)一节。
 
 顺手挖到 volatile 的真实语义，这个坑不踩一次不会知道：
 
@@ -327,7 +339,7 @@ node scripts/inspect-session.mjs --out report.txt   # 落盘（Windows 终端代
 顺带还发现：**会话标题会回落成 session id** —— 因为 `session/title` 事件（`seq=13`）在插件加载**之前**就产生了，插件收不到历史事件。已修：优先用 DSH 的 `sessionTitle` 服务（`svc.get(session)` 折叠会话日志，含启动前的标题），其次事件，最后 session 对象字段。
 
 **已跑通**
-- **108 个自动化用例全绿**：真实契约回归 + 设置卡片 + cordis ctx 形状 + 诊断日志 + CI/发布配置 + 状态机 / 摘要 / SMTP / 宿主接线
+- **122 个自动化用例全绿**：真实契约回归 + 设置卡片 + 客户端半边 + cordis ctx 形状 + 诊断日志 + README 结构 + CI/发布配置 + 状态机 / 摘要 / SMTP / 宿主接线
 - 状态机：撤销、合并、busy 挂起、`maxDwellMs` 上限、多会话隔离、`onFire` 抛错不中断
 - SMTP 客户端对着一个**真的 TCP 假服务器**跑完整对话：信封、base64 正文还原、`AUTH PLAIN`、PLAIN 不被支持时回落 `AUTH LOGIN`、明文连接拒绝发送凭据、密码错误报原文
 - `apply()` 在各种 ctx 形状下都不抛（包括「除 `get` 外全部属性都抛」的极端 Proxy）；`ctx.on` / `settings` / `sessionTitle` 缺失时都只告警不抛错
@@ -340,8 +352,12 @@ node scripts/inspect-session.mjs --out report.txt   # 落盘（Windows 终端代
 > 以及临时文件被写进仓库根目录。前者已加 `utf8-bom` 规则永久守住，后者改成一律写 `.test-tmp/`。
 
 **尚未验证**
-- 没有对真实邮箱服务商发过信（SMTP 代码路径只在假 TCP 服务器上验证过；`outbox` 通道已在真实 DSH 里跑通）
-- 设置卡片的**表单渲染**（需要先补客户端半边才会有）
+- **没有对真实邮箱服务商完整投递过**：隐式 TLS / 真证书 / 真 EHLO 已用
+  `pnpm run verify:smtp --probe` 对着 `smtp.qq.com:465` 验证通过（服务器还声明了
+  `AUTH LOGIN PLAIN`，正好对上实现的回落顺序）；但带真实凭据发出并收到邮件这一步
+  需要你自己的授权码才能验，脚本已经准备好（`pnpm run verify:smtp`）
+- 设置表单在**真实浏览器里**的渲染 —— `src/client.mjs` 已经写好并通过静态守卫，
+  但客户端半边的加载路径（`dsh.client` 扫描 → bundle route）离线跑不了，需要重启 DSH 看
 - 未在 macOS / Linux 上验证
 
 ## 发布
@@ -408,7 +424,7 @@ git push origin main --tags
 ### 本地与 CI 用同一条命令
 
 ```sh
-pnpm run check          # 语法 + 112 个用例 + demo + 设置预览 + 卫生检查 + 发布产物检查
+pnpm run check          # 语法 + 122 个用例 + demo + 设置预览 + 卫生检查 + 发布产物检查
 pnpm run check:hygiene  # 只跑敏感信息扫描
 pnpm run check:tarball  # 只跑「真打一个包再核对内容」
 ```
@@ -439,12 +455,41 @@ tail -n 40 ~/.dsh/dsh-away-notify/status.log
 
 提醒真的发出去时，会在 `~/.dsh/dsh-away-notify/outbox/` 落一对 `<时间戳>.eml` + `.txt`。
 
+## 先验证 SMTP 再指望它
+
+发信失败最让人恼火的地方是「到用的时候才发现」。所以有一个验收脚本，它跑的是插件
+**自己的**那段连接/TLS/EHLO/AUTH 代码（不是另写一份），凭据只从环境变量读，输出全程脱敏：
+
+```sh
+# 1) 只探测：连接 + TLS 握手 + EHLO，不发信、不送凭据（不需要账号）
+$env:DSH_SMTP_HOST="smtp.qq.com"; $env:DSH_SMTP_PORT="465"
+node scripts/verify-smtp.mjs --probe
+
+# 2) 真发一封：需要账号与授权码
+$env:DSH_SMTP_USER="you@qq.com"; $env:DSH_SMTP_PASS="你的授权码"
+node scripts/verify-smtp.mjs
+```
+
+探测通过长这样（真机输出）：
+
+```
+220 newxmesmtplogicsvrszc43-0.qq.com XMail Esmtp QQ Mail Server.
+250-AUTH LOGIN PLAIN XOAUTH XOAUTH2 ...
+TLS ✓ 已加密    AUTH ✓ 服务器要求认证    282 ms
+```
+
+失败时会按错误类型给提示（授权码不对 / 连不上 / 证书不匹配 / 服务器没提供 STARTTLS）。
+
+> **QQ 邮箱必须用「授权码」**（设置 → 账户 → 开启 POP3/SMTP 服务后生成），不是登录密码。
+> 另外 465 用隐式 TLS、587 用 STARTTLS —— 端口和 `smtpSecure` 配错是最常见的失败原因。
+> `pnpm run verify:smtp -- --help` 有完整环境变量列表。
+
 ## 路线图
 
 - [x] ~~真实进程端到端验证~~ —— 已完成：装进 desktop profile，真实 DSH 里跑通，
   设置页显示「运行状态：运行中」，5 分钟静默后 `outbox` 里出现了正确的提醒
-- [ ] **带表单的面板**：需要给插件加客户端半边（`dsh.client`），否则卡片只有状态没有配置项。
-  当前配置走 `cordis.patch.yml`（已验证可用）
+- [x] ~~带表单的面板~~ —— 已实现：客户端半边（`dsh.client` + `exports["./client"]`）
+  往 `settings.plugins.tab` 注册一张表单，用 `ctx.configForms` 读写、`whileServed` 跟随命名空间
 - [ ] 用 `tree/settled` 语义替代裸 `turn/end`，把子代理树也纳入「真的干完了」
 - [ ] 客户端 presence：`document.hidden` / focus 回传宿主，让「人在不在」有比 `user/message` 更早的信号
 - [ ] 卡片里显示运行状态（待发提醒数、最近一次投递），而不只是配置
