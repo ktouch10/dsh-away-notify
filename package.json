@@ -1,6 +1,6 @@
 {
   "name": "dsh-away-notify",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "DSH plugin: only ping me when the agent has really finished AND I have not come back for N minutes. Configurable dwell, brief result summary, plain SMTP or a local outbox.",
   "type": "module",
   "main": "src/index.mjs",
