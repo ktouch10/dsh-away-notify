@@ -110,6 +110,64 @@ test('你 2 分钟就回来了 → 不发', async () => {
   assert.equal(notifier.stats.delivered, 0)
 })
 
+// ─────────────────── 会话标题的来源 ───────────────────
+
+test('resolveTitle 优先于 session/title 事件（服务能拿到插件启动前的标题）', async () => {
+  const dir = await tempDir()
+  let clock = T0
+  const { config } = normalizeConfig({ dwellMinutes: 5, transport: 'outbox', outboxDir: dir })
+  const notifier = createNotifier({
+    config,
+    now: () => clock,
+    log: () => {},
+    resolveTitle: () => '来自 sessionTitle 服务的标题'
+  })
+
+  notifier.handleSessionEvent(SESSION, ev('session/title', { title: '事件里的旧标题' }))
+  runTurn(notifier)
+  clock += 5 * MIN
+  notifier.tick()
+  await notifier.flush()
+
+  const mail = notifier.deliveries.find(d => d.result).mail
+  assert.equal(mail.meta.sessionTitle, '来自 sessionTitle 服务的标题')
+  assert.match(mail.subject, /来自 sessionTitle 服务的标题/)
+})
+
+test('resolveTitle 返回空时回落到 session/title 事件', async () => {
+  const dir = await tempDir()
+  let clock = T0
+  const { config } = normalizeConfig({ dwellMinutes: 5, transport: 'outbox', outboxDir: dir })
+  const notifier = createNotifier({ config, now: () => clock, log: () => {}, resolveTitle: () => '' })
+
+  notifier.handleSessionEvent(SESSION, ev('session/title', { title: '事件里的标题' }))
+  runTurn(notifier)
+  clock += 5 * MIN
+  notifier.tick()
+  await notifier.flush()
+
+  assert.equal(notifier.deliveries.find(d => d.result).mail.meta.sessionTitle, '事件里的标题')
+})
+
+test('resolveTitle 抛错时不影响提醒本身', async () => {
+  const dir = await tempDir()
+  let clock = T0
+  const { config } = normalizeConfig({ dwellMinutes: 5, transport: 'outbox', outboxDir: dir })
+  const notifier = createNotifier({
+    config,
+    now: () => clock,
+    log: () => {},
+    resolveTitle: () => { throw new Error('标题服务炸了') }
+  })
+
+  runTurn(notifier)
+  clock += 5 * MIN
+  notifier.tick()
+  await notifier.flush()
+
+  assert.equal(notifier.stats.delivered, 1, '取标题失败绝不能影响提醒')
+})
+
 test('plugin/system 注入的用户角色消息不算「人回来了」', async () => {
   const dir = await tempDir()
   const { notifier, advance } = setup({ outboxDir: dir })

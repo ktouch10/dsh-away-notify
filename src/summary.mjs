@@ -82,8 +82,33 @@ function blankTurn (sessionId, turn) {
     lastText: '',
     durationMs: null,
     endedAt: null,
-    tokens: { input: 0, output: 0, total: 0 }
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
   }
+}
+
+/**
+ * 从 session 对象上捡标题。
+ *
+ * 这是三个标题来源里**最弱**的一个 —— 优先用 DSH 的 `sessionTitle` 服务
+ * （它折叠会话日志，连插件启动**之前**写入的标题都能拿到），其次是
+ * `session/title` 事件，最后才是这里。字段名跨 DSH 版本不一致，全部兜一遍。
+ */
+export function pickSessionName (session) {
+  if (!session || typeof session !== 'object') return ''
+  const candidates = [
+    session.name,
+    session.title,
+    session.label,
+    session.summary?.title,
+    session.summary?.name,
+    session.meta?.title,
+    session.meta?.name
+  ]
+  for (const candidate of candidates) {
+    const s = str(candidate).trim()
+    if (s) return s.slice(0, 160)
+  }
+  return ''
 }
 
 /**
@@ -123,8 +148,8 @@ export function createTurnAggregator () {
 
     // 会话对象上的标题字段（不同版本可能没有），作为兜底来源
     if (!titles.has(sessionId)) {
-      const fromSession = str(session?.name) || str(session?.title) || ''
-      if (fromSession.trim()) titles.set(sessionId, fromSession.trim().slice(0, 160))
+      const fromSession = pickSessionName(session)
+      if (fromSession) titles.set(sessionId, fromSession)
     }
 
     if (type === 'turn/start') { current.set(sessionId, blankTurn(sessionId, Number.isFinite(turn) ? turn : null)); current.get(sessionId).sessionTitle = titles.get(sessionId) || ''; return }
@@ -141,9 +166,17 @@ export function createTurnAggregator () {
       if (usage && typeof usage === 'object') {
         const input = Number(usage.inputTokens) || 0
         const output = Number(usage.outputTokens) || 0
-        const total = Number(usage.totalTokens) || (input + output)
+        const cacheRead = Number(usage.cacheReadTokens) || 0
+        const cacheWrite = Number(usage.cacheWriteTokens) || 0
+        // totalTokens 由 DSH 给出，而且**包含缓存命中**：
+        // 实测 19255 = 17319(输入) + 1536(缓存读) + 400(输出)。
+        // 拿不到时才自己加 —— 只加 input+output 会漏掉缓存，和 total 对不上，
+        // 邮件里就会出现「总数远大于输入+输出」这种看不懂的数字。
+        const total = Number(usage.totalTokens) || (input + output + cacheRead + cacheWrite)
         agg.tokens.input += input
         agg.tokens.output += output
+        agg.tokens.cacheRead += cacheRead
+        agg.tokens.cacheWrite += cacheWrite
         agg.tokens.total += total
       }
       return
@@ -188,7 +221,7 @@ export function createTurnAggregator () {
     return current.get(sessionId) ? { ...current.get(sessionId) } : null
   }
 
-  return { note, finalize, inspect, titleOf: sid => titles.get(sid) || '' }
+  return { note, finalize, inspect, noteTitle, titleOf: sid => titles.get(sid) || '' }
 }
 
 /** 这批回合是否「空转」——没有任何工具调用也没有任何回复文本。 */
@@ -241,9 +274,11 @@ export function renderNotification (notification, config) {
     const tk = t.tokens || {}
     acc.input += Number(tk.input) || 0
     acc.output += Number(tk.output) || 0
+    acc.cacheRead += Number(tk.cacheRead) || 0
+    acc.cacheWrite += Number(tk.cacheWrite) || 0
     acc.total += Number(tk.total) || 0
     return acc
-  }, { input: 0, output: 0, total: 0 })
+  }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 })
   const n = v => v.toLocaleString('en-US')
   const reasons = [...new Set(turns.map(t => t.reason).filter(Boolean))]
   const models = [...new Set(turns.flatMap(t => t.models || []))]
@@ -283,9 +318,14 @@ export function renderNotification (notification, config) {
   ]
 
   if (tokens.total > 0) {
+    // 必须把「缓存读」列出来：totalTokens 含缓存命中，不列的话
+    // 「总数 955 万 / 输入 6 千 / 输出 1.9 万」这种数字没人看得懂。
+    const parts = [`输入 ${n(tokens.input)}`, `缓存读 ${n(tokens.cacheRead)}`]
+    if (tokens.cacheWrite > 0) parts.push(`缓存写 ${n(tokens.cacheWrite)}`)
+    parts.push(`输出 ${n(tokens.output)}`)
     lines.push(zh
-      ? `消耗：${n(tokens.total)} tokens（输入 ${n(tokens.input)} / 输出 ${n(tokens.output)}）`
-      : `Usage: ${n(tokens.total)} tokens (in ${n(tokens.input)} / out ${n(tokens.output)})`)
+      ? `消耗：${n(tokens.total)} tokens（${parts.join(' / ')}）`
+      : `Usage: ${n(tokens.total)} tokens (in ${n(tokens.input)} / cache-read ${n(tokens.cacheRead)} / out ${n(tokens.output)})`)
   }
   if (toolNames.length) lines.push(zh ? `用到的工具：${toolNames.join(', ')}` : `Tools: ${toolNames.join(', ')}`)
   if (models.length) lines.push(zh ? `模型：${models.join(', ')}` : `Models: ${models.join(', ')}`)

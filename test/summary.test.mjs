@@ -6,6 +6,7 @@ import {
   extractAssistantText,
   isToolFailure,
   isEmptyBurst,
+  pickSessionName,
   renderNotification,
   suppressionReason
 } from '../src/summary.mjs'
@@ -166,4 +167,93 @@ test('抑制规则：低于 minToolCalls 不发', () => {
 test('抑制规则：有回复文本但没工具调用，默认照发', () => {
   const { config } = normalizeConfig({})
   assert.equal(suppressionReason({ payloads: [{ toolCalls: 0, lastText: '普通一问一答' }] }, config), null)
+})
+
+// ─────────────────── usage：totalTokens 含缓存命中 ───────────────────
+
+test('usage 累加缓存命中；totalTokens 缺失时按四项求和', () => {
+  const agg = createTurnAggregator()
+  feed(agg, 's1', [
+    {
+      type: 'assistant/message',
+      data: {
+        turn: 1,
+        message: { content: [{ type: 'text', text: 'a' }] },
+        // 刻意不给 totalTokens
+        usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 500, cacheWriteTokens: 30 }
+      }
+    },
+    {
+      type: 'assistant/message',
+      data: {
+        turn: 1,
+        message: { content: [{ type: 'text', text: 'b' }] },
+        usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4, totalTokens: 999 }
+      }
+    }
+  ])
+  const record = agg.finalize('s1', 1, 'completed', T0)
+
+  assert.deepEqual(record.tokens, {
+    input: 101,
+    output: 22,
+    cacheRead: 503,
+    cacheWrite: 34,
+    // 第一条自己加（100+20+500+30=650），第二条用 DSH 给的 999
+    total: 1649
+  })
+})
+
+test('渲染：token 行必须列出缓存读，否则总数看不懂', () => {
+  const { config } = normalizeConfig({})
+  // 这一组就是本机真实跑出来的数字：总数 955 万，而输入+输出只有 2.5 万
+  const mail = renderNotification({
+    key: 's1',
+    payloads: [{
+      sessionId: 's1',
+      sessionTitle: '示例会话',
+      turn: 1,
+      reason: 'completed',
+      toolCalls: 26,
+      toolFailures: 5,
+      toolNames: ['pwsh'],
+      models: ['deepseek-flash'],
+      lastText: 'x',
+      tokens: { input: 5971, output: 19035, cacheRead: 9530624, cacheWrite: 0, total: 9555630 }
+    }],
+    turns: 1,
+    firstTurnEndAt: T0,
+    lastTurnEndAt: T0,
+    firedAt: T0,
+    waitedMs: 0,
+    burstMs: 0
+  }, config)
+
+  assert.match(mail.text, /消耗：9,555,630 tokens/)
+  assert.match(mail.text, /缓存读 9,530,624/)
+  assert.match(mail.text, /输入 5,971/)
+  assert.match(mail.text, /输出 19,035/)
+  assert.ok(!mail.text.includes('缓存写'), '缓存写为 0 时不显示，避免噪音')
+})
+
+// ─────────────────── 会话标题的三个来源 ───────────────────
+
+test('pickSessionName 兼容多个字段名，取不到返回空串', () => {
+  assert.equal(pickSessionName({ name: 'A' }), 'A')
+  assert.equal(pickSessionName({ title: 'B' }), 'B')
+  assert.equal(pickSessionName({ label: 'C' }), 'C')
+  assert.equal(pickSessionName({ summary: { title: 'D' } }), 'D')
+  assert.equal(pickSessionName({ meta: { name: 'E' } }), 'E')
+  assert.equal(pickSessionName({}), '')
+  assert.equal(pickSessionName(null), '')
+  assert.equal(pickSessionName({ name: '   ' }), '')
+  assert.equal(pickSessionName({ name: 'F'.repeat(500) }).length, 160, '过长的标题要截断')
+})
+
+test('折叠器可以外部补标题（给 sessionTitle 服务用）', () => {
+  const agg = createTurnAggregator()
+  feed(agg, 's1', [{ type: 'turn/start', data: { turn: 1 } }])
+  agg.noteTitle('s1', '外部补的标题')
+  const record = agg.finalize('s1', 1, 'completed', T0)
+  assert.equal(record.sessionTitle, '外部补的标题')
 })

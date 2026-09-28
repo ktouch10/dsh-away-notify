@@ -55,23 +55,36 @@ dsh plugin --profile desktop add link:/path/to/dsh-away-notify
 
 ## 面板（设置卡片）
 
-装好后在 **设置 → 插件 → dsh-away-notify** 里配置，不用碰 YAML，改完**立即生效**（`applies: live`，不用重启）。
+> ⚠️ **实测结论：只有宿主半边的插件，卡片上不会有配置表单。**
+>
+> 在真实 DSH 里验证过：插件行会正常显示（完整名称 / 配置状态 / 运行状态），
+> 但**没有那 22 个字段**。拿装了半年的 `qq-mode-console` 做对照 —— 它也完全一样，
+> 而它的源码注释写着：「本插件没有 browser/client 半，**不会自动生成 WebUI 设置卡片**」。
+>
+> 也就是说 **DSH 的设置表单需要插件带「客户端半边」**（package.json 里的 `dsh.client`
+> 声明 + 浏览器端代码），光有 `ctx.settings.register` + `Config` 只够让命名空间**可读写**
+> （供程序通过设置 API 读写），不足以渲染表单。
+>
+> 所以本插件目前的配置方式是 **`cordis.patch.yml`**（完全可用，实测生效）。
+> 带表单的面板在[路线图](#路线图)里。
 
-不重启 DSH 也能先看清这张卡片长什么样：
+`cordis.patch.yml` 这条路是验证过的；卡片上的三个「条件」也各自验证过：
+
+不重启 DSH 也能先看清命名空间会长什么样：
 
 ```sh
 node scripts/print-settings.mjs
 ```
 
-DSH 是从插件的 `Config` schema **自动生成**这张卡片的，需要三个条件同时成立，缺一个就没有可写卡片：
+命名空间要能被程序**写入**，需要三个条件同时成立：
 
-| 条件 | 本插件的做法 |
-|---|---|
-| `cordis.patch.yml` 里 entry 的 `id` **恰好等于**命名空间名 | `id: away-notify`（`name` 才是包名） |
-| 插件模块导出 `Config` | `src/settings.mjs` 构造，`src/index.mjs` 再导出 |
-| `Config` 里至少有一个 volatile 字段 | 22 个字段**全部** volatile |
+| 条件 | 本插件的做法 | 验证情况 |
+|---|---|---|
+| `cordis.patch.yml` 里 entry 的 `id` **恰好等于**命名空间名 | `id: away-notify`（`name` 才是包名） | 卡片显示 `include:away-notify` ✓ |
+| 插件模块导出 `Config` | `src/settings.mjs` 构造，`src/index.mjs` 再导出 | 卡片「配置状态：已启用」= schema 校验通过 ✓ |
+| `Config` 里至少有一个 volatile 字段 | 22 个字段**全部** volatile | `print-settings.mjs` 审计 + 用例断言 ✓ |
 
-第二条里的细节值得记一下：**只有 volatile 字段会出现在可写表单里**（DSH 用 `volatileForm(schema)` 过滤），漏标就等于该字段在卡片上消失。
+第二条里的细节值得记一下：**只有 volatile 字段会出现在表单里**（DSH 用 `volatileForm(schema)` 过滤），漏标就等于该字段消失。
 
 密码那一栏标了 `role('secret')`，主机端不会把值回传给浏览器。
 
@@ -156,7 +169,7 @@ Subject: [DSH] 任务已结束，5.0 分钟无人应答 · 修复登录接口超
 会话 ID：s-demo
 结束原因：completed
 规模：3 轮 · 3 次工具调用
-消耗：61,014 tokens（输入 1,470 / 输出 1,083）
+消耗：61,014 tokens（输入 1,470 / 缓存读 58,461 / 输出 1,083）
 静默时长：5.0 分钟（自最后一次回合结束起）
 整批跨度：21.8 分钟
 首个回合结束：2026-09-28 02:01:10Z
@@ -177,7 +190,7 @@ Subject: [DSH] 任务已结束，5.0 分钟无人应答 · 修复登录接口超
 ```sh
 pnpm install                         # 2 个 devDependency：@deepseek-ai/schemastery、yaml
 pnpm run check                       # 一条命令跑完全部检查（与 CI 完全相同）
-node --test test/                    # 82 个用例
+node --test test/                    # 108 个用例
 node scripts/demo.mjs                # 端到端演示（虚拟时钟，不发真实邮件）
 node scripts/print-settings.mjs      # 打印设置卡片（面板）的字段表
 node scripts/inspect-session.mjs     # 读出你本机 DSH 的真实事件契约
@@ -212,6 +225,7 @@ node scripts/inspect-session.mjs     # 读出你本机 DSH 的真实事件契约
 
 ```
 src/settings.mjs       设置命名空间 + 设置卡片 schema（含 volatile / secret / 降级）
+src/diag.mjs           诊断日志（启动结果、配置摘要脱敏、每次决策）
 src/dwell.mjs          纯延迟状态机（不碰时钟、不碰 IO，可确定性测试）
 src/summary.mjs        事件折叠 + 摘要渲染 + 抑制规则
 src/transports.mjs     outbox 落盘 + 自研极简 SMTP（只用 node:net / node:tls）
@@ -223,6 +237,8 @@ test/smtp.test.mjs             对着真的 TCP 假 SMTP 服务器跑完整对�
 test/notifier.test.mjs         宿主接线（虚拟时钟 + outbox）
 test/real-contract.test.mjs    真实契约回归（钉住从真实会话日志里核对出的形状）
 test/settings.test.mjs         设置卡片（schema 审计 + volatile 语义 + 命名空间注册）
+test/cordis-ctx.test.mjs       真实 cordis ctx 形状下的启动鲁棒性（Proxy 裸读会抛）
+test/diag.test.mjs             诊断日志（含「日志里绝不能出现密码」的断言）
 test/ci-config.test.mjs        CI / 发布配置（真解析 workflow YAML，不是正则猜）
 test/fixtures/real-events.mjs  真实事件样本，逐字抄自本机会话日志
 scripts/check.mjs              全量检查入口（本地与 CI 同一条命令）
@@ -273,9 +289,11 @@ node scripts/inspect-session.mjs --out report.txt   # 落盘（Windows 终端代
 
 **最关键的一条发现**：DSH 会往 `user/message` 里注入 **`role` 同样是 `"user"`** 的非人类消息，真实出现过的 `source.kind` 有 `runtime-context`、`skill-catalog`、`agent-message`、`subagent-settled`。如果按 `role === 'user'` 判断「人回来了」，这些每回合都会到 —— 待发提醒会被系统行为一次次撤销，插件**永远不发信**。所以只认 `source.kind === 'user'`，并有 `test/real-contract.test.mjs` 逐条钉住。
 
-**面板：schema 可审计，但渲染未验证。**
+**面板：命名空间三个条件全部实测通过，但表单需要客户端半边。**
 
-`@deepseek-ai/schemastery` 的 schema 能 `toJSON()`，所以「卡片会长成什么样」大部分能在没有 DSH 的情况下断言：22 个字段**全部**是 volatile（漏标就不会出现在表单里）、密码字段是 `role: 'secret'`、字段集与默认值一一对应、`cordis.patch.yml` 的 entry id 等于命名空间。
+`@deepseek-ai/schemastery` 的 schema 能 `toJSON()`，所以命名空间的大部分性质能在没有 DSH 的情况下断言：22 个字段**全部**是 volatile（漏标就不会出现在表单里）、密码字段是 `role: 'secret'`、字段集与默认值一一对应、`cordis.patch.yml` 的 entry id 等于命名空间。
+
+装进真实 DSH 后，卡片显示 `include:away-notify` + **配置状态：已启用** —— 说明 entry id 正确、`Config` 被读到、schema 校验通过。但**没有配置表单**；对照实验（`qq-mode-console` 也一样）确认原因是插件缺客户端半边，详见[面板](#面板设置卡片)一节。
 
 顺手挖到 volatile 的真实语义，这个坑不踩一次不会知道：
 
@@ -289,22 +307,42 @@ node scripts/inspect-session.mjs --out report.txt   # 落盘（Windows 终端代
 
 所以 `config.mjs` 在归一化之前先做一次 `unwrapVolatile()`，两种输入（解析后的引用 / 原始扁平值）都能吃。另有 10 条用例专门守这块。
 
+### 真实 DSH 端到端：已跑通
+
+装进 `desktop` profile 后重启，真实链路的实测结果是：
+
+| 观察点 | 结果 |
+|---|---|
+| 设置 → 插件里的状态 | **运行中**（第一次是「启动失败」，见下） |
+| 卡片上的配置状态 | **已启用**（schema 校验通过） |
+| 我发完一条消息后静默 5 分钟 | `~/.dsh/dsh-away-notify/outbox/` 里出现了 `<时间戳>.eml` + `.txt` |
+| 邮件内容 | `结束原因：completed`、`1 轮 · 26 次工具调用（5 次失败）`、`静默时长：5.1 分钟` —— 全部正确 |
+
+**这一步抓到了两个只有真跑才会暴露的问题：**
+
+| # | 问题 | 根因 |
+|---|---|---|
+| 1 | 插件在真实 DSH 里**启动失败** | cordis 的 ctx 是 Proxy，**裸读一个没有 inject 的服务会直接抛** `cannot get property "x" without inject`；可选链 `ctx?.x` 挡不住（抛的是属性读取本身）。而 `apply()` 开头就裸读 `ctx.settings`，且在 try/catch 外 |
+| 2 | 邮件里 token 数字看不懂（总数 955 万，输入+输出只有 2.5 万） | `totalTokens` **包含缓存命中**（实测 `19255 = 17319 + 1536 + 400`），而我渲染时只列了输入/输出 |
+
+顺带还发现：**会话标题会回落成 session id** —— 因为 `session/title` 事件（`seq=13`）在插件加载**之前**就产生了，插件收不到历史事件。已修：优先用 DSH 的 `sessionTitle` 服务（`svc.get(session)` 折叠会话日志，含启动前的标题），其次事件，最后 session 对象字段。
+
 **已跑通**
-- **82 个自动化用例全绿**：8 条真实契约回归 + 19 条设置卡片/配置 + 13 条 CI/发布配置 + 状态机 / 摘要 / SMTP / 宿主接线
+- **108 个自动化用例全绿**：真实契约回归 + 设置卡片 + cordis ctx 形状 + 诊断日志 + CI/发布配置 + 状态机 / 摘要 / SMTP / 宿主接线
 - 状态机：撤销、合并、busy 挂起、`maxDwellMs` 上限、多会话隔离、`onFire` 抛错不中断
 - SMTP 客户端对着一个**真的 TCP 假服务器**跑完整对话：信封、base64 正文还原、`AUTH PLAIN`、PLAIN 不被支持时回落 `AUTH LOGIN`、明文连接拒绝发送凭据、密码错误报原文
-- `apply()` 在假 ctx 上完成订阅与卸载；`ctx.on` / `settings` 缺失时只告警不抛错；`enabled=false` 时仍注册设置卡片（否则没有 UI 入口再打开它）
+- `apply()` 在各种 ctx 形状下都不抛（包括「除 `get` 外全部属性都抛」的极端 Proxy）；`ctx.on` / `settings` / `sessionTitle` 缺失时都只告警不抛错
 - demo 端到端产出有效 `.eml`（RFC 2047 主题折行、base64 正文）
-- **发布产物**：真打一个包（12 个文件 / 32.5 KiB），解开 tar 核对必需文件、`src/` 无遗漏、无 `test/`/`scripts/`/`node_modules/` 混入、包内 `dsh.bundle.patch` 仍在、entry id 仍等于命名空间，并对包内每个文件重跑一遍敏感信息规则
-- **两道守卫都做过负向验证**：往源文件注入 UTF-8 BOM → 卫生检查确实红；把 `repository` 的 `OWNER` 换成真名 → 占位符提示确实消失
+- **发布产物**：真打一个包，解开 tar 核对必需文件、`src/` 无遗漏、无 `test/`/`scripts/`/`node_modules/` 混入、包内 `dsh.bundle.patch` 仍在、entry id 仍等于命名空间，并对包内每个文件重跑一遍敏感信息规则
+- **守卫都做过负向验证**：注入 UTF-8 BOM → 卫生检查确实红；把 `repository` 的 `OWNER` 换成真名 → 占位符提示确实消失
 
 > 发布准备期间守卫抓到的两个真问题，都是自己引入的：`Out-File`/`Set-Content -Encoding utf8`
 > 给 `package.json` 加了 **UTF-8 BOM**（`JSON.parse` 直接抛 `Unexpected token`），
 > 以及临时文件被写进仓库根目录。前者已加 `utf8-bom` 规则永久守住，后者改成一律写 `.test-tmp/`。
 
 **尚未验证**
-- **没有在真实 DSH 进程里加载过。** 事件契约与 schema 都核对过了，但「插件能不能被 profile 正常挂载、`apply()` 在真 ctx 上拿到的 `event`/`config` 是否与预期逐字段一致、设置卡片实际渲染成什么样」还没验证 —— 需要重启 DSH 才能试
-- 没有对真实邮箱服务商发过信（SMTP 代码路径只在假服务器上验证过）
+- 没有对真实邮箱服务商发过信（SMTP 代码路径只在假 TCP 服务器上验证过；`outbox` 通道已在真实 DSH 里跑通）
+- 设置卡片的**表单渲染**（需要先补客户端半边才会有）
 - 未在 macOS / Linux 上验证
 
 ## 发布
@@ -371,7 +409,7 @@ git push origin main --tags
 ### 本地与 CI 用同一条命令
 
 ```sh
-pnpm run check          # 语法 + 69 个用例 + demo + 设置预览 + 卫生检查 + 发布产物检查
+pnpm run check          # 语法 + 108 个用例 + demo + 设置预览 + 卫生检查 + 发布产物检查
 pnpm run check:hygiene  # 只跑敏感信息扫描
 pnpm run check:tarball  # 只跑「真打一个包再核对内容」
 ```
@@ -381,12 +419,36 @@ pnpm run check:tarball  # 只跑「真打一个包再核对内容」
 `cordis.patch.yml` 的 entry id 是否仍等于设置命名空间，最后对包内每个文件再跑一遍敏感信息规则。
 打不出包时它**直接失败**，不静默跳过 —— 否则 CI 会给人「已检查」的错觉。
 
+## 排查：为什么没收到提醒
+
+DSH **不保存插件主机端的输出**（它的 `logs/` 里只有崩溃日志），所以插件自己写一份很小的状态日志：
+
+```
+~/.dsh/dsh-away-notify/status.log
+```
+
+里面按时间顺序记着：`apply` 是否跑完、配置摘要（**凭据已脱敏**）、settings 服务可用性、
+命名空间注册结果、`session/event` 订阅结果，以及之后每一次 **排定 / 撤销 / 挂起 / 投递**。
+
+```sh
+# 看最近发生了什么
+tail -n 40 ~/.dsh/dsh-away-notify/status.log
+```
+
+日志有 256KB 上限，超了整份重写；目录不可写就静默降级 —— 写日志失败**永远不会**影响提醒本身。
+`DSH_AWAY_NOTIFY_DIAG_DIR` 可以改目录（测试用它避免污染主目录）。
+
+提醒真的发出去时，会在 `~/.dsh/dsh-away-notify/outbox/` 落一对 `<时间戳>.eml` + `.txt`。
+
 ## 路线图
 
-- [ ] 真实进程端到端验证（装进 profile + 重启 DSH，确认挂载、事件流、卡片渲染）
+- [x] ~~真实进程端到端验证~~ —— 已完成：装进 desktop profile，真实 DSH 里跑通，
+  设置页显示「运行状态：运行中」，5 分钟静默后 `outbox` 里出现了正确的提醒
+- [ ] **带表单的面板**：需要给插件加客户端半边（`dsh.client`），否则卡片只有状态没有配置项。
+  当前配置走 `cordis.patch.yml`（已验证可用）
 - [ ] 用 `tree/settled` 语义替代裸 `turn/end`，把子代理树也纳入「真的干完了」
 - [ ] 客户端 presence：`document.hidden` / focus 回传宿主，让「人在不在」有比 `user/message` 更早的信号
-- [ ] 在卡片里显示运行状态（待发提醒数、最近一次投递），而不只是配置
+- [ ] 卡片里显示运行状态（待发提醒数、最近一次投递），而不只是配置
 - [ ] 免打扰时段、多通道扇出（webhook / Bark / 飞书）
 
 ## License

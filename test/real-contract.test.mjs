@@ -95,8 +95,14 @@ test('真实回合：工具数、失败数、文本摘要、模型、token 全�
   // 摘要只取 text 分片，不能把 reasoning 或 tool-call 混进来
   assert.equal(record.lastText, '示例回复：任务已完成，测试通过。')
   assert.ok(!record.lastText.includes('示例推理'))
-  // 真实 usage 键名
-  assert.deepEqual(record.tokens, { input: 490, output: 361, total: 20338 })
+  // 真实 usage 键名（含缓存命中 —— totalTokens 是包含它们的，邮件里必须列出来）
+  assert.deepEqual(record.tokens, {
+    input: 490,
+    output: 361,
+    cacheRead: 19200,
+    cacheWrite: 0,
+    total: 20338
+  })
   assert.equal(record.sessionTitle, '示例会话标题')
 })
 
@@ -184,6 +190,7 @@ test('用真实记录渲染的邮件：原因正确、不出现 [object Object]�
   assert.match(mail.text, /结束原因：completed/)
   assert.match(mail.text, /3 次工具调用（2 次失败）/)
   assert.match(mail.text, /消耗：20,338 tokens/)
+  assert.match(mail.text, /缓存读 19,200/, '总数含缓存命中，必须列出来，否则数字对不上')
   assert.match(mail.text, /示例回复：任务已完成/)
   assert.match(mail.subject, /5\.0 分钟无人应答/)
 })

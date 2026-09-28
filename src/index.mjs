@@ -12,7 +12,7 @@
 
 import { normalizeConfig, DEFAULTS } from './config.mjs'
 import { createDwellScheduler } from './dwell.mjs'
-import { createTurnAggregator, renderNotification, suppressionReason, normalizeReason } from './summary.mjs'
+import { createTurnAggregator, renderNotification, suppressionReason, normalizeReason, pickSessionName } from './summary.mjs'
 import { deliver } from './transports.mjs'
 import { NAMESPACE, Config, readService, registerSettings, setupSettings } from './settings.mjs'
 import { createDiagnostics, describeConfig } from './diag.mjs'
@@ -40,6 +40,36 @@ function makeLogger (ctx, diag = null) {
     } catch {
       // 日志失败不该影响任何事
     }
+  }
+}
+
+/**
+ * 会话标题解析 —— 三个来源，按可靠性排序。
+ *
+ * ① DSH 的 `sessionTitle` 服务：`svc.get(session)` 是**折叠会话日志**得来的，
+ *    **连插件启动之前写入的标题也能拿到**。
+ *    本插件第一次跑出来的邮件里标题回落成了 session id，原因就是 `session/title`
+ *    事件（seq=13）在插件加载之前就产生了，插件收不到历史事件。
+ * ② `session/title` 事件 —— 由折叠器处理，只能拿到启动后的新增/更新。
+ * ③ session 对象上的 name/title/... 字段（跨版本兜底）。
+ *
+ * svc.get(session) 是同步的，可能返回字符串，也可能返回 { title } / { text }。
+ * 用法参照本机 dsh-whale-widget 的实测实现；老宿主没有这个服务就静默回落。
+ */
+function makeTitleResolver (ctx) {
+  return session => {
+    try {
+      const svc = readService(ctx, 'sessionTitle')
+      if (svc && typeof svc.get === 'function' && session) {
+        const snapshot = svc.get(session)
+        const title = typeof snapshot === 'string' ? snapshot : (snapshot && (snapshot.title || snapshot.text))
+        const value = String(title ?? '').trim()
+        if (value) return value.slice(0, 160)
+      }
+    } catch {
+      // 没有这个服务 / 调用失败，都交给下面的兜底
+    }
+    return pickSessionName(session)
   }
 }
 
@@ -85,7 +115,8 @@ export function createNotifier ({
   config,
   deliver: deliverFn = deliver,
   log = () => {},
-  now = () => Date.now()
+  now = () => Date.now(),
+  resolveTitle = () => ''
 }) {
   const stats = {
     turnEnds: 0,
@@ -171,6 +202,14 @@ export function createNotifier ({
         stats.turnEnds += 1
         const data = event?.data && typeof event.data === 'object' ? event.data : {}
         const turn = Number(data.turn)
+        // 收口之前先补一次标题：sessionTitle 服务能拿到插件启动**之前**写入的标题，
+        // 而 session/title 事件只覆盖启动之后（本会话的标题就是加载前产生的，seq=13）。
+        try {
+          const title = resolveTitle(session)
+          if (title) agg.noteTitle(sessionId, title)
+        } catch {
+          // 取标题失败绝不能影响提醒本身
+        }
         const record = agg.finalize(sessionId, turn, data.reason, at)
           || synthesizeRecord(agg, sessionId, turn, data.reason, at)
         scheduler.noteTurnEnd(sessionId, record, at)
@@ -257,7 +296,7 @@ export function apply (ctx, rawConfig = {}) {
     return { config, stats: null, notifier: null, dispose () {} }
   }
 
-  const notifier = createNotifier({ config, log })
+  const notifier = createNotifier({ config, log, resolveTitle: makeTitleResolver(ctx) })
 
   // ctx 是 Proxy：连 `typeof ctx.on` 这样的能力探测都可能抛（属性读取本身就会抛），
   // 所以探测也必须包起来。

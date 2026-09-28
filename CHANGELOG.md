@@ -32,5 +32,23 @@
 - **DSH 会注入 `role` 同样是 `"user"` 的非人类消息**（`runtime-context` / `skill-catalog` / `agent-message` / `subagent-settled`）。按 `role === 'user'` 判断「人回来了」的话，这些每回合都会到，待发提醒会被系统行为一次次撤销 —— 插件看起来正常但永远不发信。只认 `source.kind === 'user'`
 - **schemastery 的 volatile 字段是引用对象 `{ get() }`**，`JSON.stringify` 会静默丢掉它们的值（键还在、值全变 `{}`），`structuredClone` 直接抛错
 
+### 真实 DSH 端到端验证时发现并修掉的问题
+
+装进 `desktop` profile 真跑之后才暴露出来的，离线测试永远测不到：
+
+- **插件在真实 DSH 里「启动失败」**：cordis 的 ctx 是 Proxy，**访问一个没有 inject 的服务会直接抛**
+  `cannot get property "x" without inject` —— 可选链 `ctx?.x` 挡不住（抛的是属性读取这个动作本身）。
+  `apply()` 开头就裸读 `ctx.settings` / `ctx.logger`，且都在 try/catch 外，所以启动即炸
+- **邮件里的 token 数字看不懂**：`totalTokens` **包含缓存命中**（实测 `19255 = 17319 + 1536 + 400`），
+  而渲染时只列了输入/输出。现在把「缓存读」也列出来
+- **会话标题回落成 session id**：`session/title` 事件在插件加载**之前**就产生了，插件收不到历史事件。
+  改为优先用 DSH 的 `sessionTitle` 服务（`svc.get(session)` 折叠会话日志，含启动前的标题）
+
+### 新增
+
+- **诊断日志**：DSH 不保存插件主机端的输出，所以插件自己写 `~/.dsh/dsh-away-notify/status.log`
+  （启动结果、配置摘要**脱敏**、注册与订阅结果、每次决策；256KB 上限；写失败不影响功能）
+- **排查章节**（README「为什么没收到提醒」）
+
 [Unreleased]: https://github.com/ktouch10/dsh-away-notify/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/ktouch10/dsh-away-notify/releases/tag/v0.1.0
