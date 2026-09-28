@@ -14,6 +14,9 @@ const T0 = Date.parse('2026-09-28T09:00:00Z')
 // 在 TMPDIR 下新建子目录，用 os.tmpdir() 会让整套投递用例无辜失败。
 const TEST_TMP = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.test-tmp')
 
+// apply() 会写诊断日志；重定向到仓库内，免得跑测试污染 ~/.dsh
+process.env.DSH_AWAY_NOTIFY_DIAG_DIR = path.join(TEST_TMP, 'diag-notifier')
+
 async function tempDir () {
   const dir = path.join(TEST_TMP, `t-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
   await fs.mkdir(dir, { recursive: true })

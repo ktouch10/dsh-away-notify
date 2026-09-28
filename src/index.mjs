@@ -15,6 +15,7 @@ import { createDwellScheduler } from './dwell.mjs'
 import { createTurnAggregator, renderNotification, suppressionReason, normalizeReason } from './summary.mjs'
 import { deliver } from './transports.mjs'
 import { NAMESPACE, Config, readService, registerSettings, setupSettings } from './settings.mjs'
+import { createDiagnostics, describeConfig } from './diag.mjs'
 
 export const name = 'dsh-away-notify'
 
@@ -22,12 +23,15 @@ export const name = 'dsh-away-notify'
 // 而条目 id 必须等于设置命名空间 —— 两者共同决定设置卡片能不能写。
 export { Config }
 
-function makeLogger (ctx) {
+function makeLogger (ctx, diag = null) {
   // 必须走 readService：cordis 的 ctx 是 Proxy，裸读一个没 inject 的服务会抛
   // `cannot get property "logger" without inject`，可选链挡不住（`ctx?.logger` 同样抛）。
   const sink = readService(ctx, 'logger')
   return (level, message) => {
     const line = `[dsh-away-notify] ${message}`
+    // 同时落盘一份：DSH 不保存插件主机端的输出（logs/ 里只有崩溃日志），
+    // 没有这份日志就无从排查「为什么没收到提醒」。
+    diag?.write(level, message)
     try {
       if (sink && typeof sink[level] === 'function') sink[level](line)
       else if (level === 'error') console.error(line)
@@ -231,11 +235,21 @@ export function createNotifier ({
  */
 export function apply (ctx, rawConfig = {}) {
   const { config, warnings } = normalizeConfig(rawConfig)
-  const log = makeLogger(ctx)
+
+  // 诊断日志：启动结果 / 配置摘要（凭据脱敏）/ 注册与订阅结果 / 每次决策。
+  // 环境变量只用于测试或特殊部署时重定向，免得跑测试污染用户主目录。
+  const diag = createDiagnostics({ dir: process.env.DSH_AWAY_NOTIFY_DIAG_DIR || null })
+  const log = makeLogger(ctx, diag)
+
+  log('info', '=== apply 开始 ===')
+  if (diag.file) log('info', `诊断日志: ${diag.file}`)
+  else log('warn', '诊断日志不可写（不影响功能，只是事后没法排查）')
+  log('info', `配置: ${describeConfig(config)}`)
   for (const warning of warnings) log('warn', warning)
 
   // 必须在 enabled 判断之前注册：否则用户把插件关掉之后，就再也没有 UI 入口把它打开了。
   // setupSettings 全程 try/catch，且会在 settings 服务晚到时延迟绑定。
+  log('info', `settings 服务此刻${readService(ctx, 'settings') ? '可用' : '不可用（将尝试延迟绑定）'}`)
   setupSettings(ctx, { log })
 
   if (!config.enabled) {
@@ -256,6 +270,7 @@ export function apply (ctx, rawConfig = {}) {
     try {
       const disposer = ctx.on('session/event', notifier.handleSessionEvent)
       if (typeof disposer === 'function') disposers.push(disposer)
+      log('info', 'session/event 订阅成功')
     } catch (error) {
       log('error', `订阅 session/event 失败：${error?.message ?? error}`)
     }
@@ -305,3 +320,4 @@ export function apply (ctx, rawConfig = {}) {
 
 export { normalizeConfig, DEFAULTS, unwrapVolatile } from './config.mjs'
 export { NAMESPACE, SETTINGS_DEFAULTS, buildConfig, registerSettings, readService, setupSettings } from './settings.mjs'
+export { createDiagnostics, describeConfig, defaultDiagDir, DIAG_FILE } from './diag.mjs'

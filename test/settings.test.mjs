@@ -27,6 +27,9 @@ import { apply } from '../src/index.mjs'
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
+// apply() 会写诊断日志；重定向到仓库内，免得跑测试污染 ~/.dsh
+process.env.DSH_AWAY_NOTIFY_DIAG_DIR = path.join(ROOT, '.test-tmp', 'diag-settings')
+
 /** 从序列化后的 schema 里取出顶层每个字段的节点。 */
 function fieldNodes (schema) {
   const json = schema.toJSON()
