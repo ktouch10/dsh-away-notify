@@ -182,6 +182,16 @@ export function createNotifier ({
   const inflight = new Set()
   const lastSeq = new Map() // sessionId -> 已处理的最大 seq
 
+  /**
+   * 会话短标签，只用于诊断日志。
+   * 不能直接 slice(0, 8)：会话 id 长这样 `session-86052c05-…`，前 8 个字符正好是
+   * `session-` —— 看着像有标签，其实区分不了任何会话（真实踩过）。
+   */
+  const shortSession = id => {
+    const s = String(id ?? '')
+    return ((s.startsWith('session-') ? s.slice(8) : s).slice(0, 8)) || 'default'
+  }
+
   async function run (notification) {
     stats.fired += 1
     const entry = { notification, mail: null, result: null, error: null }
@@ -262,7 +272,7 @@ export function createNotifier ({
         scheduler.noteTurnEnd(sessionId, record, at)
         stats.scheduled += 1
         {
-          const label = String(sessionId).slice(0, 8)
+          const label = String(shortSession(sessionId))
           let deadline = null
           try { deadline = scheduler.deadlineOf(sessionId) } catch { deadline = null }
           log('info', `排定 ${label}（第 ${record.turn ?? '?'} 轮，原因 ${record.reason}）：`
@@ -277,12 +287,12 @@ export function createNotifier ({
           // 显式开启时，才把「开新回合」也当成人在的信号（见 cordis.patch.yml 说明）
           if (scheduler.noteUserActivity(sessionId, at, 'turn-start')) {
             stats.cancelled += 1
-            log('info', `撤销 ${String(sessionId).slice(0, 8)} 的待发提醒（cancelOnTurnStart 打开，新回合视为人在）`)
+            log('info', `撤销 ${shortSession(sessionId)} 的待发提醒（cancelOnTurnStart 打开，新回合视为人在）`)
           }
         } else if (scheduler.noteTurnStart(sessionId, at)) {
           // 默认语义：只挂起，不撤销 —— 活还没干完，不该发「任务已结束」
           stats.paused += 1
-          log('info', `挂起 ${String(sessionId).slice(0, 8)} 的待发提醒（新回合开始，活还没干完）`)
+          log('info', `挂起 ${shortSession(sessionId)} 的待发提醒（新回合开始，活还没干完）`)
         }
         return
       }
@@ -303,7 +313,7 @@ export function createNotifier ({
         if (config.cancelOnUserMessage && fromHuman) {
           if (scheduler.noteUserActivity(sessionId, at, `user-message:${kind || 'unknown'}`)) {
             stats.cancelled += 1
-            log('info', `撤销 ${String(sessionId).slice(0, 8)} 的待发提醒（真人消息回来了：${kind || 'user'}）`)
+            log('info', `撤销 ${shortSession(sessionId)} 的待发提醒（真人消息回来了：${kind || 'user'}）`)
           }
         }
       }
